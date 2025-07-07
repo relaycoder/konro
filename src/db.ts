@@ -1,7 +1,7 @@
-import { ColumnDefinition, KonroSchema, RelationDefinition } from './schema';
+import { AggregationDefinition, ColumnDefinition, KonroSchema, RelationDefinition } from './schema';
 import { StorageAdapter } from './adapter';
 import { DatabaseState, KRecord } from './types';
-import { _queryImpl, _insertImpl, _updateImpl, _deleteImpl, createEmptyState as createEmptyStateImpl, QueryDescriptor } from './operations';
+import { _queryImpl, _insertImpl, _updateImpl, _deleteImpl, createEmptyState as createEmptyStateImpl, QueryDescriptor, _aggregateImpl, AggregationDescriptor } from './operations';
 import { createPredicateFromPartial } from './utils/predicate.util';
 
 // A helper to normalize a predicate argument
@@ -22,6 +22,9 @@ interface ChainedQueryBuilder<T> {
   offset(count: number): this;
   all(): Promise<T[]>;
   first(): Promise<T | null>;
+  aggregate<TAggs extends Record<string, AggregationDefinition>>(
+    aggregations: TAggs
+  ): Promise<{ [K in keyof TAggs]: number | null }>;
 }
 
 interface QueryBuilder<S extends KonroSchema<any, any>> {
@@ -95,6 +98,10 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
           },
           all: async () => _queryImpl(state, schema, descriptor) as S['types'][T][],
           first: async () => (_queryImpl(state, schema, { ...descriptor, limit: 1 })[0] ?? null) as S['types'][T] | null,
+          aggregate: async <TAggs extends Record<string, AggregationDefinition>>(aggregations: TAggs) => {
+            const aggDescriptor: AggregationDescriptor = { ...descriptor, aggregations };
+            return _aggregateImpl(state, schema, aggDescriptor) as { [K in keyof TAggs]: number | null };
+          },
         };
         return builder;
       },

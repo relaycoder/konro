@@ -45,6 +45,12 @@ export interface RelationDefinition {
   references: string;
 }
 
+export interface AggregationDefinition {
+  _type: 'aggregation';
+  aggType: 'sum' | 'avg' | 'min' | 'max' | 'count';
+  column?: string;
+}
+
 // --- TYPE INFERENCE MAGIC ---
 
 type BaseModels<TTables extends Record<string, Record<string, ColumnDefinition<any>>>> = {
@@ -85,6 +91,14 @@ export const object = <T extends Record<string, any>>(options?: ColumnOptions<T>
 export const one = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'one', targetTable, ...options });
 export const many = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'many', targetTable, ...options });
 
+
+// --- AGGREGATION HELPERS ---
+
+export const count = (): AggregationDefinition => ({ _type: 'aggregation', aggType: 'count' });
+export const sum = (column: string): AggregationDefinition => ({ _type: 'aggregation', aggType: 'sum', column });
+export const avg = (column: string): AggregationDefinition => ({ _type: 'aggregation', aggType: 'avg', column });
+export const min = (column: string): AggregationDefinition => ({ _type: 'aggregation', aggType: 'min', column });
+export const max = (column: string): AggregationDefinition => ({ _type: 'aggregation', aggType: 'max', column });
 // --- SCHEMA BUILDER ---
 
 type SchemaInputDef<T> = {

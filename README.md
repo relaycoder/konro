@@ -306,8 +306,24 @@ const results = await db.query(state)
   .offset(number)   // Optional: Skip records for pagination
   .all();           // Terminator: Returns Promise<Array<T>>
 
-// Or to get just one record:
 const single = await db.query(state).from('users').where({ id: 1 }).first(); // Returns Promise<T | null>
+```
+
+### Aggregating Data with `db.query()`
+
+The same query chain can be used to perform calculations like `count`, `sum`, `avg`, `min`, and `max`.
+
+```typescript
+const stats = await db.query(state)
+  .from('posts')
+  .where({ published: true })
+  .aggregate({
+    postCount: konro.count(),
+    // Assuming a 'views' number column on posts
+    averageViews: konro.avg('views'),
+  });
+
+console.log(`Published posts: ${stats.postCount}, with an average of ${stats.averageViews} views.`);
 ```
 
 ### Inserting Data with `db.insert()`
@@ -392,6 +408,7 @@ Konro prioritizes data integrity, safety, and developer experience. The default 
 |                | `db.createEmptyState()`               | Creates a fresh, empty `DatabaseState` object.   |
 | **Data Ops**   | `db.query(state)`                     | Starts a fluent read-query chain.                |
 |                | `db.insert(state, table, vals)`       | Returns `[newState, inserted]`.                  |
+|                | `...aggregate(aggs)`                  | Terminator: Computes aggregations like count, sum, etc. |
 |                | `db.update(state, table)`             | Starts a fluent update-query chain.              |
 |                | `db.delete(state, table)`             | Starts a fluent delete-query chain.              |
 

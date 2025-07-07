@@ -1,5 +1,5 @@
 import { DatabaseState, KRecord } from './types';
-import { KonroSchema, RelationDefinition, ColumnDefinition } from './schema';
+import { KonroSchema, RelationDefinition, ColumnDefinition, AggregationDefinition } from './schema';
 import { KonroError, KonroValidationError } from './utils/error.util';
 
 // --- HELPERS ---
@@ -23,6 +23,10 @@ export interface QueryDescriptor {
   with?: Record<string, boolean | { select?: Record<string, ColumnDefinition<unknown>>; where?: (record: KRecord) => boolean }>;
   limit?: number;
   offset?: number;
+}
+
+export interface AggregationDescriptor extends QueryDescriptor {
+  aggregations: Record<string, AggregationDefinition>;
 }
 
 export const _queryImpl = <S extends KonroSchema<any, any>>(state: DatabaseState, schema: S, descriptor: QueryDescriptor): KRecord[] => {
@@ -59,10 +63,10 @@ export const _queryImpl = <S extends KonroSchema<any, any>>(state: DatabaseState
               if (!def) continue;
               // nested with() does not support selecting relations, only columns, as per spec.
               if (def._type === 'column') {
-                  const colName = Object.keys(targetTableSchema).find(key => targetTableSchema[key] === def);
-                  if (colName && rec.hasOwnProperty(colName)) {
-                      newRec[outputKey] = rec[colName];
-                  }
+                const colName = Object.keys(targetTableSchema).find(key => targetTableSchema[key] === def);
+                if (colName && rec.hasOwnProperty(colName)) {
+                  newRec[outputKey] = rec[colName];
+                }
               }
             }
             return newRec;
@@ -94,15 +98,15 @@ export const _queryImpl = <S extends KonroSchema<any, any>>(state: DatabaseState
         const def = descriptor.select![outputKey];
         if (!def) continue;
         if (def._type === 'column') {
-            const colName = Object.keys(tableSchema).find(key => tableSchema[key] === def);
-            if (colName && rec.hasOwnProperty(colName)) {
-                newRec[outputKey] = rec[colName];
-            }
+          const colName = Object.keys(tableSchema).find(key => tableSchema[key] === def);
+          if (colName && rec.hasOwnProperty(colName)) {
+            newRec[outputKey] = rec[colName];
+          }
         } else if (def._type === 'relation') {
-            const relName = Object.keys(relationsSchema).find(key => relationsSchema[key] === def);
-            if (relName && rec.hasOwnProperty(relName)) {
-                newRec[outputKey] = rec[relName];
-            }
+          const relName = Object.keys(relationsSchema).find(key => relationsSchema[key] === def);
+          if (relName && rec.hasOwnProperty(relName)) {
+            newRec[outputKey] = rec[relName];
+          }
         }
       }
       return newRec;
@@ -131,6 +135,61 @@ const findRelatedRecords = (state: DatabaseState, record: KRecord, relationDef: 
   return [];
 };
 
+// --- AGGREGATION ---
+
+export const _aggregateImpl = <S extends KonroSchema<any, any>>(
+  state: DatabaseState,
+  _schema: S, // Not used but keep for API consistency
+  descriptor: AggregationDescriptor
+): Record<string, number | null> => {
+  const tableState = state[descriptor.tableName];
+  if (!tableState) return {};
+
+  const filteredRecords = descriptor.where ? tableState.records.filter(descriptor.where) : [...tableState.records];
+  const results: Record<string, number | null> = {};
+
+  for (const resultKey in descriptor.aggregations) {
+    const aggDef = descriptor.aggregations[resultKey];
+    if (!aggDef) continue;
+
+    if (aggDef.aggType === 'count') {
+      results[resultKey] = filteredRecords.length;
+      continue;
+    }
+
+    if (!aggDef.column) {
+      throw KonroError(`Aggregation '${aggDef.aggType}' requires a column.`);
+    }
+    const column = aggDef.column;
+
+    const values = filteredRecords.map(r => r[column]).filter(v => typeof v === 'number') as number[];
+
+    if (values.length === 0) {
+      if (aggDef.aggType === 'sum') {
+        results[resultKey] = 0; // sum of empty set is 0
+      } else {
+        results[resultKey] = null; // avg, min, max of empty set is null
+      }
+      continue;
+    }
+
+    switch (aggDef.aggType) {
+      case 'sum':
+        results[resultKey] = values.reduce((sum, val) => sum + val, 0);
+        break;
+      case 'avg':
+        results[resultKey] = values.reduce((sum, val) => sum + val, 0) / values.length;
+        break;
+      case 'min':
+        results[resultKey] = Math.min(...values);
+        break;
+      case 'max':
+        results[resultKey] = Math.max(...values);
+        break;
+    }
+  }
+  return results;
+};
 
 // --- INSERT ---
 

@@ -1,6 +1,6 @@
 import { createDatabase } from './db';
 import { createFileAdapter } from './adapter';
-import { createSchema, id, string, number, boolean, date, object, one, many } from './schema';
+import { createSchema, id, string, number, boolean, date, object, one, many, count, sum, avg, min, max } from './schema';
 
 /**
  * The main Konro object, providing access to all core functionalities
@@ -32,4 +32,10 @@ export const konro = {
   // --- Relationship Definition Helpers ---
   one,
   many,
+  // --- Aggregation Definition Helpers ---
+  count,
+  sum,
+  avg,
+  min,
+  max,
 };

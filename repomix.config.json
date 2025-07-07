@@ -28,7 +28,7 @@
     "src",
     "README.md",
     "docs/api-technical-specification.md",
-    "test/unit/Schema"
+    "test"
   ],
   "ignore": {
     "useGitignore": true,

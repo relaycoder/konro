@@ -28,6 +28,7 @@
         *   6.2.6. `.limit(count)`
         *   6.2.7. `.offset(count)`
         *   6.2.8. `.all()` and `.first()` (Terminators)
+        *   6.2.9. `.aggregate(aggregations)` (Terminator)
     *   [6.3. Insert Operation: `db.insert(state, tableName, values)`](#63-insert-operation-dbinsertstate-tablename-values)
     *   [6.4. Update Operation: `db.update(state, tableName).set(data).where(predicate)`](#64-update-operation-dbupdatestate-tablenamesetdatawherepredicate)
         *   6.4.1. `db.update(state, tableName)`
@@ -236,6 +237,13 @@ These functions create runtime schema nodes for column definitions. They also in
 *   `konro.date(options?: { default?: () => Date })`: `ColumnDefinition` for a Date. Stored as ISO 8601 string.
 *   `konro.object<T>(options?: { default?: T | (() => T) })`: `ColumnDefinition` for arbitrary JSON objects. `T` provides TypeScript type hinting.
 
+*   **Aggregation Helpers**: These functions create descriptors for use with the `.aggregate()` query terminator.
+    *   `konro.count()`: Counts matching records.
+    *   `konro.sum(columnName: string)`: Computes the sum of a numeric column.
+    *   `konro.avg(columnName: string)`: Computes the average of a numeric column.
+    *   `konro.min(columnName: string)`: Finds the minimum value in a numeric column.
+    *   `konro.max(columnName: string)`: Finds the maximum value in a numeric column.
+
 ### 4.3. Relationship Definition Helpers
 
 These define how tables are virtually linked.
@@ -393,6 +401,14 @@ These methods execute the query built by the chain.
 *   `.first()`: `Promise<T | null>`
     *   Executes the query and returns a promise resolving to the first matching record or `null` if no record is found. `T` is the inferred result type.
 
+#### 6.2.9. `.aggregate(aggregations)` (Terminator)
+Executes the query and computes aggregate values.
+
+*   `aggregations`: `Record<string, AggregationDefinition>` - An object where keys are the desired output keys for your result, and values are calls to aggregation helpers (`konro.count()`, `konro.sum('column')`, etc.).
+*   **Returns**: `Promise<Record<string, number | null>>`
+    *   A promise resolving to an object where keys match the ones provided in `aggregations` and values are the computed results.
+    *   For `avg`, `min`, and `max` on an empty set (or a set with no numeric values for the column), the result is `null`. For `sum`, it's `0`. For `count`, it's `0`.
+
 ```typescript
 import { db } from './db'; // Assume db context is set up
 import type { User, Product } from './schema';
@@ -425,6 +441,17 @@ const userWithTheirProducts: User | null = await db.query(appState)
     },
   })
   .first();
+
+// Aggregation Example
+const stats = await db.query(appState)
+  .from('products')
+  .where(p => p.sellerId === 1)
+  .aggregate({
+    productCount: konro.count(),
+    totalValue: konro.sum('price'),
+    averagePrice: konro.avg('price'),
+  });
+// stats might be -> { productCount: 5, totalValue: 1500.50, averagePrice: 300.10 }
 ```
 
 ### 6.3. Insert Operation: `db.insert(state, tableName, values)`

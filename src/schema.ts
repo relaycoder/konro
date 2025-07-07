@@ -6,7 +6,18 @@ type Pretty<T> = { [K in keyof T]: T[K] } & {};
 export interface ColumnOptions<T> {
   unique?: boolean;
   default?: T | (() => T);
-  [key: string]: any; // For rules like min, max, format etc.
+}
+
+export interface StringColumnOptions extends ColumnOptions<string> {
+  min?: number;
+  max?: number;
+  format?: 'email' | 'uuid' | 'url';
+}
+
+export interface NumberColumnOptions extends ColumnOptions<number> {
+  min?: number;
+  max?: number;
+  type?: 'integer';
 }
 
 export interface ColumnDefinition<T> {
@@ -55,8 +66,8 @@ export interface KonroSchema<
 // --- SCHEMA HELPERS ---
 
 export const id = (): ColumnDefinition<number> => ({ _type: 'column', dataType: 'id', options: { unique: true }, _tsType: 0 });
-export const string = (options?: ColumnOptions<string>): ColumnDefinition<string> => ({ _type: 'column', dataType: 'string', options, _tsType: '' });
-export const number = (options?: ColumnOptions<number>): ColumnDefinition<number> => ({ _type: 'column', dataType: 'number', options, _tsType: 0 });
+export const string = (options?: StringColumnOptions): ColumnDefinition<string> => ({ _type: 'column', dataType: 'string', options, _tsType: '' });
+export const number = (options?: NumberColumnOptions): ColumnDefinition<number> => ({ _type: 'column', dataType: 'number', options, _tsType: 0 });
 export const boolean = (options?: ColumnOptions<boolean>): ColumnDefinition<boolean> => ({ _type: 'column', dataType: 'boolean', options, _tsType: false });
 export const date = (options?: ColumnOptions<Date>): ColumnDefinition<Date> => ({ _type: 'column', dataType: 'date', options, _tsType: new Date() });
 export const object = <T extends Record<string, any>>(options?: ColumnOptions<T>): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options, _tsType: {} as T });

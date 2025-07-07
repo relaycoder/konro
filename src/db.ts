@@ -1,45 +1,57 @@
 import { KonroSchema } from './schema';
 import { StorageAdapter } from './adapter';
 import { DatabaseState, KRecord } from './types';
-import { _queryImpl, _insertImpl, _updateImpl, _deleteImpl, createEmptyState as createEmptyStateImpl } from './operations';
+import { _queryImpl, _insertImpl, _updateImpl, _deleteImpl, createEmptyState as createEmptyStateImpl, QueryDescriptor } from './operations';
 
-interface DbContext<S extends KonroSchema<any, any>> {
+// A helper to create a predicate function from a partial object
+const createPredicate = <T extends KRecord>(partial: Partial<T>) =>
+  (record: T): boolean =>
+    Object.entries(partial).every(([key, value]) => (record as KRecord)[key] === value);
+
+// A helper to normalize a predicate argument
+const normalizePredicate = <T extends KRecord>(predicate: Partial<T> | ((record: T) => boolean)): ((record: KRecord) => boolean) =>
+  typeof predicate === 'function' ? predicate as ((record: KRecord) => boolean) : createPredicate(predicate as Partial<KRecord>);
+
+// --- TYPE-SAFE FLUENT API BUILDERS ---
+
+interface ChainedQueryBuilder<T> {
+  where(predicate: Partial<T> | ((record: T) => boolean)): this;
+  with(relations: QueryDescriptor['with']): this;
+  limit(count: number): this;
+  offset(count: number): this;
+  all(): Promise<T[]>;
+  first(): Promise<T | null>;
+}
+
+interface QueryBuilder<S extends KonroSchema<any, any>> {
+  from<T extends keyof S['tables']>(tableName: T): ChainedQueryBuilder<S['types'][T]>;
+}
+
+interface UpdateBuilder<T> {
+  set(data: Partial<T>): {
+    where(predicate: Partial<T> | ((record: T) => boolean)): [DatabaseState, T[]];
+  };
+}
+
+interface DeleteBuilder<T> {
+  where(predicate: Partial<T> | ((record: T) => boolean)): [DatabaseState, T[]];
+}
+
+export interface DbContext<S extends KonroSchema<any, any>> {
   schema: S;
   adapter: StorageAdapter;
-  read: () => Promise<DatabaseState>;
-  write: (state: DatabaseState) => Promise<void>;
-  createEmptyState: () => DatabaseState;
+  read(): Promise<DatabaseState>;
+  write(state: DatabaseState): Promise<void>;
+  createEmptyState(): DatabaseState;
 
-  query: (state: DatabaseState) => QueryBuilder;
-  insert: <T extends keyof S['types']>(state: DatabaseState, tableName: T, values: S['types'][T] | S['types'][T][]) => [DatabaseState, S['types'][T] | S['types'][T][]];
-  update: (state: DatabaseState, tableName: keyof S['types']) => UpdateBuilder;
-  delete: (state: DatabaseState, tableName: keyof S['types']) => DeleteBuilder;
+  query(state: DatabaseState): QueryBuilder<S>;
+  insert<T extends keyof S['types']>(state: DatabaseState, tableName: T, values: S['types'][T] | Readonly<S['types'][T]>[]): [DatabaseState, S['types'][T] | S['types'][T][]];
+  update<T extends keyof S['tables']>(state: DatabaseState, tableName: T): UpdateBuilder<S['types'][T]>;
+  delete<T extends keyof S['tables']>(state: DatabaseState, tableName: T): DeleteBuilder<S['types'][T]>;
 }
-
-// Fluent API Builders
-interface QueryBuilder {
-  from: (tableName: string) => this;
-  where: (predicate: any) => this;
-  with: (relations: any) => this;
-  limit: (count: number) => this;
-  offset: (count: number) => this;
-  all: <T = KRecord>() => Promise<T[]>;
-  first: <T = KRecord>() => Promise<T | null>;
-}
-
-interface UpdateBuilder {
-  set: (data: any) => { where: (predicate: any) => [DatabaseState, KRecord[]]; };
-}
-
-interface DeleteBuilder {
-  where: (predicate: any) => [DatabaseState, KRecord[]];
-}
-
 
 export const createDatabase = <S extends KonroSchema<any, any>>(options: { schema: S, adapter: StorageAdapter }): DbContext<S> => {
   const { schema, adapter } = options;
-
-  const normalize = (p: any) => typeof p === 'function' ? p : (r: KRecord) => Object.entries(p).every(([k, v]) => r[k] === v);
 
   return {
     schema,
@@ -50,32 +62,53 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
 
     insert: (state, tableName, values) => {
       const valsArray = Array.isArray(values) ? values : [values];
-      const [newState, inserted] = _insertImpl(state, schema, tableName as string, valsArray);
-      return [newState, Array.isArray(values) ? inserted : inserted[0]] as any;
+      const [newState, inserted] = _insertImpl(state, schema, tableName as string, valsArray as KRecord[]);
+      const result = Array.isArray(values) ? inserted : inserted[0];
+      return [newState, result] as [DatabaseState, S['types'][typeof tableName] | S['types'][typeof tableName][]];
     },
 
-    query: (state) => {
-      const descriptor: any = {};
-      const builder: QueryBuilder = {
-        from: (tableName) => { descriptor.tableName = tableName; return builder; },
-        where: (predicate) => { descriptor.where = normalize(predicate); return builder; },
-        with: (relations) => { descriptor.with = relations; return builder; },
-        limit: (count) => { descriptor.limit = count; return builder; },
-        offset: (count) => { descriptor.offset = count; return builder; },
-        all: () => Promise.resolve(_queryImpl(state, schema, descriptor)) as any,
-        first: () => Promise.resolve(_queryImpl(state, schema, { ...descriptor, limit: 1 })[0] ?? null) as any,
-      };
-      return builder;
-    },
+    query: (state: DatabaseState): QueryBuilder<S> => ({
+      from: <T extends keyof S['tables']>(tableName: T): ChainedQueryBuilder<S['types'][T]> => {
+        const descriptor: QueryDescriptor = { tableName: tableName as string };
 
-    update: (state, tableName) => ({
+        const builder: ChainedQueryBuilder<S['types'][T]> = {
+          where: (predicate) => {
+            descriptor.where = normalizePredicate(predicate);
+            return builder;
+          },
+          with: (relations) => {
+            descriptor.with = relations;
+            return builder;
+          },
+          limit: (count) => {
+            descriptor.limit = count;
+            return builder;
+          },
+          offset: (count) => {
+            descriptor.offset = count;
+            return builder;
+          },
+          all: async () => _queryImpl(state, schema, descriptor) as S['types'][T][],
+          first: async () => (_queryImpl(state, schema, { ...descriptor, limit: 1 })[0] ?? null) as S['types'][T] | null,
+        };
+        return builder;
+      },
+    }),
+
+    update: <T extends keyof S['tables']>(state: DatabaseState, tableName: T): UpdateBuilder<S['types'][T]> => ({
       set: (data) => ({
-        where: (predicate) => _updateImpl(state, tableName as string, data, normalize(predicate)),
+        where: (predicate) => {
+          const [newState, updatedRecords] = _updateImpl(state, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate));
+          return [newState, updatedRecords as S['types'][T][]];
+        },
       }),
     }),
 
-    delete: (state, tableName) => ({
-      where: (predicate) => _deleteImpl(state, tableName as string, normalize(predicate)),
+    delete: <T extends keyof S['tables']>(state: DatabaseState, tableName: T): DeleteBuilder<S['types'][T]> => ({
+      where: (predicate) => {
+        const [newState, deletedRecords] = _deleteImpl(state, tableName as string, normalizePredicate(predicate));
+        return [newState, deletedRecords as S['types'][T][]];
+      },
     }),
   };
 };

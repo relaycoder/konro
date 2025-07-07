@@ -15,10 +15,10 @@ export const createEmptyState = (schema: KonroSchema<any, any>): DatabaseState =
 
 // --- QUERY ---
 
-interface QueryDescriptor {
+export interface QueryDescriptor {
   tableName: string;
   where?: (record: KRecord) => boolean;
-  with?: Record<string, boolean | { where?: (rec: KRecord) => boolean }>;
+  with?: Record<string, boolean | { where?: (record: KRecord) => boolean }>;
   limit?: number;
   offset?: number;
 }
@@ -43,9 +43,11 @@ export const _queryImpl = (state: DatabaseState, schema: KonroSchema<any, any>, 
         const withOpts = descriptor.with[relationName];
         const nestedWhere = typeof withOpts === 'object' ? withOpts.where : undefined;
 
-        record[relationName] = nestedWhere ? relatedRecords.filter(nestedWhere) : relatedRecords;
+        const filteredRelatedRecords = nestedWhere ? relatedRecords.filter(nestedWhere) : relatedRecords;
         if (relationDef.relationType === 'one') {
-          record[relationName] = record[relationName][0] ?? null;
+          record[relationName] = filteredRelatedRecords[0] ?? null;
+        } else {
+          record[relationName] = filteredRelatedRecords;
         }
       }
     }

@@ -12,5 +12,6 @@ export type DatabaseState = {
 
 /**
  * A generic representation of a single record within a table.
+ * It uses `unknown` for values to enforce type-safe access.
  */
-export type KRecord = Record<string, any>;
+export type KRecord = Record<string, unknown>;

@@ -1,5 +1,5 @@
 {
-  "name": "konro-db",
+  "name": "konro",
   "module": "src/index.ts",
   "type": "module",
   "devDependencies": {

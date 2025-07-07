@@ -2,7 +2,6 @@
 ```
 docs/
   api-technical-specification.md
-  README.md
 src/
   utils/
     constants.ts
@@ -32,6 +31,7 @@ test/
       Constraints.test.ts
   util.ts
 package.json
+README.md
 tsconfig.json
 ```
 
@@ -692,9 +692,214 @@ Konro will use specific custom error classes to provide clearer context for fail
 *   **Migrations:** A system to handle schema evolution.
 ````
 
-## File: docs/README.md
+## File: src/utils/constants.ts
+````typescript
+export const TEMP_FILE_SUFFIX = '.tmp';
+````
+
+## File: src/utils/fs.util.ts
+````typescript
+import { promises as fs } from 'fs';
+import path from 'path';
+import { TEMP_FILE_SUFFIX } from './constants';
+
+export const readFile = async (filepath: string): Promise<string | null> => {
+  try {
+    return await fs.readFile(filepath, 'utf-8');
+  } catch (error: any) {
+    if (error.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+};
+
+export const writeAtomic = async (filepath: string, content: string): Promise<void> => {
+    // Adding Date.now() for uniqueness in case of concurrent operations
+    const tempFilepath = `${filepath}.${Date.now()}${TEMP_FILE_SUFFIX}`;
+    await fs.mkdir(path.dirname(filepath), { recursive: true });
+    await fs.writeFile(tempFilepath, content, 'utf-8');
+    await fs.rename(tempFilepath, filepath);
+};
+````
+
+## File: src/utils/predicate.util.ts
+````typescript
+import { KRecord } from '../types';
+
+/** Creates a predicate function from a partial object for equality checks, avoiding internal casts. */
+export const createPredicateFromPartial = <T extends KRecord>(partial: Partial<T>): ((record: T) => boolean) => {
+  // `Object.keys` is cast because TypeScript types it as `string[]` instead of `(keyof T)[]`.
+  const keys = Object.keys(partial) as (keyof T)[];
+  return (record: T): boolean => keys.every(key => record[key] === partial[key]);
+};
+````
+
+## File: src/utils/serializer.util.ts
+````typescript
+import { KonroStorageError } from './error.util';
+
+let yaml: { parse: (str: string) => unknown; stringify: (obj: any, options?: any) => string; } | undefined;
+try {
+  // Lazily attempt to load optional dependency
+  yaml = require('js-yaml');
+} catch {
+  // js-yaml is not installed.
+}
+
+export type Serializer = {
+  parse: <T>(data: string) => T;
+  stringify: (obj: any) => string;
+};
+
+export const getSerializer = (format: 'json' | 'yaml'): Serializer => {
+  if (format === 'json') {
+    return {
+      parse: <T>(data: string): T => JSON.parse(data),
+      stringify: (obj: any): string => JSON.stringify(obj, null, 2),
+    };
+  }
+
+  if (!yaml) {
+    throw KonroStorageError("The 'yaml' format requires 'js-yaml' to be installed. Please run 'npm install js-yaml'.");
+  }
+
+  return {
+    // The cast from `unknown` is necessary as `yaml.parse` is correctly typed to return `unknown`.
+    parse: <T>(data: string): T => yaml.parse(data) as T,
+    stringify: (obj: any): string => yaml.stringify(obj),
+  };
+};
+````
+
+## File: src/index.ts
+````typescript
+import { createDatabase } from './db';
+import { createFileAdapter } from './adapter';
+import { createSchema, id, string, number, boolean, date, object, one, many } from './schema';
+
+/**
+ * The main Konro object, providing access to all core functionalities
+ * for schema definition, database creation, and adapter configuration.
+ */
+export const konro = {
+  /**
+   * Defines the structure, types, and relations of your database.
+   * This is the single source of truth for both runtime validation and static types.
+   */
+  createSchema,
+  /**
+   * Creates the main `db` context, which is the primary interface for all
+   * database operations (read, write, query, etc.).
+   */
+  createDatabase,
+  /**
+   * Creates a file-based storage adapter for persisting the database state
+   * to a JSON or YAML file.
+   */
+  createFileAdapter,
+  // --- Column Definition Helpers ---
+  id,
+  string,
+  number,
+  boolean,
+  date,
+  object,
+  // --- Relationship Definition Helpers ---
+  one,
+  many,
+};
+````
+
+## File: test/unit/Schema/CreateSchema.test.ts
+````typescript
+import { describe, it, expect } from 'bun:test';
+import { konro } from '../../../src/index';
+
+describe('Unit > Schema > CreateSchema', () => {
+  it('should correctly assemble a full schema object from tables and relations definitions', () => {
+    const tableDefs = {
+      users: {
+        id: konro.id(),
+        name: konro.string(),
+      },
+      posts: {
+        id: konro.id(),
+        title: konro.string(),
+        authorId: konro.number(),
+      },
+    };
+
+    const schema = konro.createSchema({
+      tables: tableDefs,
+      relations: () => ({
+        users: {
+          posts: konro.many('posts', { on: 'id', references: 'authorId' }),
+        },
+        posts: {
+          author: konro.one('users', { on: 'authorId', references: 'id' }),
+        },
+      }),
+    });
+
+    expect(schema.tables).toBe(tableDefs);
+    expect(schema.relations).toBeDefined();
+    expect(schema.relations.users.posts).toBeDefined();
+    expect(schema.relations.posts.author).toBeDefined();
+    expect(schema.types).toBeNull(); // Runtime placeholder
+  });
+
+  it('should handle schemas with no relations defined', () => {
+    const tableDefs = {
+      logs: {
+        id: konro.id(),
+        message: konro.string(),
+      },
+    };
+
+    const schema = konro.createSchema({
+      tables: tableDefs,
+    });
+
+    expect(schema.tables).toBe(tableDefs);
+    expect(schema.relations).toEqual({});
+  });
+});
+````
+
+## File: test/unit/Schema/RelationHelpers.test.ts
+````typescript
+import { describe, it, expect } from 'bun:test';
+import { konro } from '../../../src/index';
+
+describe('Unit > Schema > RelationHelpers', () => {
+  it('should create a valid one-to-many relationship definition object when calling konro.many()', () => {
+    const manyRel = konro.many('posts', { on: 'id', references: 'authorId' });
+    expect(manyRel).toEqual({
+      _type: 'relation',
+      relationType: 'many',
+      targetTable: 'posts',
+      on: 'id',
+      references: 'authorId',
+    });
+  });
+
+  it('should create a valid one-to-one/many-to-one relationship definition object when calling konro.one()', () => {
+    const oneRel = konro.one('users', { on: 'authorId', references: 'id' });
+    expect(oneRel).toEqual({
+      _type: 'relation',
+      relationType: 'one',
+      targetTable: 'users',
+      on: 'authorId',
+      references: 'id',
+    });
+  });
+});
+````
+
+## File: README.md
 ````markdown
-# KonroDB: The Type-Safe, Functional ORM for JSON/YAML
+# Konro: The Type-Safe, Functional ORM for JSON/YAML
 
 <p align="center">
   <img src="https://i.imgur.com/vHq4gXz.png" alt="Konro Logo - A bowl of soup representing the database state, with spices (functions) being added" width="200" />
@@ -1115,21 +1320,21 @@ Konro is a community-driven project. Contributions are warmly welcome. Whether i
 [MIT](./LICENSE) © [Your Name]
 ````
 
-## File: src/utils/constants.ts
-````typescript
-export const TEMP_FILE_SUFFIX = '.tmp';
-````
-
 ## File: src/utils/error.util.ts
 ````typescript
-// Per user request: no classes. Using factory functions for errors.
-const createKonroError = (name: string) => (message: string): Error => {
-  const error = new Error(message);
-  error.name = name;
-  return error;
+// Per user request: no classes. Using constructor functions for errors.
+const createKonroError = (name: string) => {
+  function KonroErrorConstructor(message: string) {
+    const error = new Error(message);
+    error.name = name;
+    Object.setPrototypeOf(error, KonroErrorConstructor.prototype);
+    return error;
+  }
+  Object.setPrototypeOf(KonroErrorConstructor.prototype, Error.prototype);
+  return KonroErrorConstructor;
 };
 
-/** Base class for all Konro-specific errors. */
+/** Base constructor for all Konro-specific errors. */
 export const KonroError = createKonroError('KonroError');
 
 /** Thrown for storage adapter-related issues. */
@@ -1142,118 +1347,25 @@ export const KonroValidationError = createKonroError('KonroValidationError');
 export const KonroNotFoundError = createKonroError('KonroNotFoundError');
 ````
 
-## File: src/utils/fs.util.ts
+## File: src/types.ts
 ````typescript
-import { promises as fs } from 'fs';
-import path from 'path';
-import { TEMP_FILE_SUFFIX } from './constants';
-
-export const readFile = async (filepath: string): Promise<string | null> => {
-  try {
-    return await fs.readFile(filepath, 'utf-8');
-  } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  }
-};
-
-export const writeAtomic = async (filepath: string, content: string): Promise<void> => {
-    // Adding Date.now() for uniqueness in case of concurrent operations
-    const tempFilepath = `${filepath}.${Date.now()}${TEMP_FILE_SUFFIX}`;
-    await fs.mkdir(path.dirname(filepath), { recursive: true });
-    await fs.writeFile(tempFilepath, content, 'utf-8');
-    await fs.rename(tempFilepath, filepath);
-};
-````
-
-## File: src/utils/predicate.util.ts
-````typescript
-import { KRecord } from '../types';
-
-/** Creates a predicate function from a partial object for equality checks, avoiding internal casts. */
-export const createPredicateFromPartial = <T extends KRecord>(partial: Partial<T>): ((record: T) => boolean) => {
-  // `Object.keys` is cast because TypeScript types it as `string[]` instead of `(keyof T)[]`.
-  const keys = Object.keys(partial) as (keyof T)[];
-  return (record: T): boolean => keys.every(key => record[key] === partial[key]);
-};
-````
-
-## File: src/utils/serializer.util.ts
-````typescript
-import { KonroStorageError } from './error.util';
-
-let yaml: { parse: (str: string) => unknown; stringify: (obj: any, options?: any) => string; } | undefined;
-try {
-  // Lazily attempt to load optional dependency
-  yaml = require('js-yaml');
-} catch {
-  // js-yaml is not installed.
-}
-
-export type Serializer = {
-  parse: <T>(data: string) => T;
-  stringify: (obj: any) => string;
-};
-
-export const getSerializer = (format: 'json' | 'yaml'): Serializer => {
-  if (format === 'json') {
-    return {
-      parse: <T>(data: string): T => JSON.parse(data),
-      stringify: (obj: any): string => JSON.stringify(obj, null, 2),
+/**
+ * The in-memory representation of the entire database. It is a plain, immutable object.
+ */
+export type DatabaseState = {
+  [tableName: string]: {
+    records: KRecord[];
+    meta: {
+      lastId: number;
     };
-  }
-
-  if (!yaml) {
-    throw KonroStorageError("The 'yaml' format requires 'js-yaml' to be installed. Please run 'npm install js-yaml'.");
-  }
-
-  return {
-    // The cast from `unknown` is necessary as `yaml.parse` is correctly typed to return `unknown`.
-    parse: <T>(data: string): T => yaml.parse(data) as T,
-    stringify: (obj: any): string => yaml.stringify(obj),
   };
 };
-````
-
-## File: src/index.ts
-````typescript
-import { createDatabase } from './db';
-import { createFileAdapter } from './adapter';
-import { createSchema, id, string, number, boolean, date, object, one, many } from './schema';
 
 /**
- * The main Konro object, providing access to all core functionalities
- * for schema definition, database creation, and adapter configuration.
+ * A generic representation of a single record within a table.
+ * It uses `unknown` for values to enforce type-safe access.
  */
-export const konro = {
-  /**
-   * Defines the structure, types, and relations of your database.
-   * This is the single source of truth for both runtime validation and static types.
-   */
-  createSchema,
-  /**
-   * Creates the main `db` context, which is the primary interface for all
-   * database operations (read, write, query, etc.).
-   */
-  createDatabase,
-  /**
-   * Creates a file-based storage adapter for persisting the database state
-   * to a JSON or YAML file.
-   */
-  createFileAdapter,
-  // --- Column Definition Helpers ---
-  id,
-  string,
-  number,
-  boolean,
-  date,
-  object,
-  // --- Relationship Definition Helpers ---
-  one,
-  many,
-};
+export type KRecord = Record<string, unknown>;
 ````
 
 ## File: test/unit/Core/Delete.test.ts
@@ -1820,97 +1932,10 @@ describe('Unit > Schema > ColumnHelpers', () => {
 
   it('should create a valid object column definition', () => {
     const objCol = konro.object<{ meta: string }>();
-    expect(objCol).toEqual({
+    expect(objCol).toMatchObject({
       _type: 'column',
       dataType: 'object',
       options: undefined,
-      _tsType: undefined,
-    });
-  });
-});
-````
-
-## File: test/unit/Schema/CreateSchema.test.ts
-````typescript
-import { describe, it, expect } from 'bun:test';
-import { konro } from '../../../src/index';
-
-describe('Unit > Schema > CreateSchema', () => {
-  it('should correctly assemble a full schema object from tables and relations definitions', () => {
-    const tableDefs = {
-      users: {
-        id: konro.id(),
-        name: konro.string(),
-      },
-      posts: {
-        id: konro.id(),
-        title: konro.string(),
-        authorId: konro.number(),
-      },
-    };
-
-    const schema = konro.createSchema({
-      tables: tableDefs,
-      relations: () => ({
-        users: {
-          posts: konro.many('posts', { on: 'id', references: 'authorId' }),
-        },
-        posts: {
-          author: konro.one('users', { on: 'authorId', references: 'id' }),
-        },
-      }),
-    });
-
-    expect(schema.tables).toBe(tableDefs);
-    expect(schema.relations).toBeDefined();
-    expect(schema.relations.users.posts).toBeDefined();
-    expect(schema.relations.posts.author).toBeDefined();
-    expect(schema.types).toBeNull(); // Runtime placeholder
-  });
-
-  it('should handle schemas with no relations defined', () => {
-    const tableDefs = {
-      logs: {
-        id: konro.id(),
-        message: konro.string(),
-      },
-    };
-
-    const schema = konro.createSchema({
-      tables: tableDefs,
-    });
-
-    expect(schema.tables).toBe(tableDefs);
-    expect(schema.relations).toEqual({});
-  });
-});
-````
-
-## File: test/unit/Schema/RelationHelpers.test.ts
-````typescript
-import { describe, it, expect } from 'bun:test';
-import { konro } from '../../../src/index';
-
-describe('Unit > Schema > RelationHelpers', () => {
-  it('should create a valid one-to-many relationship definition object when calling konro.many()', () => {
-    const manyRel = konro.many('posts', { on: 'id', references: 'authorId' });
-    expect(manyRel).toEqual({
-      _type: 'relation',
-      relationType: 'many',
-      targetTable: 'posts',
-      on: 'id',
-      references: 'authorId',
-    });
-  });
-
-  it('should create a valid one-to-one/many-to-one relationship definition object when calling konro.one()', () => {
-    const oneRel = konro.one('users', { on: 'authorId', references: 'id' });
-    expect(oneRel).toEqual({
-      _type: 'relation',
-      relationType: 'one',
-      targetTable: 'users',
-      on: 'authorId',
-      references: 'id',
     });
   });
 });
@@ -2061,31 +2086,10 @@ export const ensureTestDir = async () => {
 }
 ````
 
-## File: src/types.ts
-````typescript
-/**
- * The in-memory representation of the entire database. It is a plain, immutable object.
- */
-export type DatabaseState = {
-  [tableName: string]: {
-    records: KRecord[];
-    meta: {
-      lastId: number;
-    };
-  };
-};
-
-/**
- * A generic representation of a single record within a table.
- * It uses `unknown` for values to enforce type-safe access.
- */
-export type KRecord = Record<string, unknown>;
-````
-
 ## File: package.json
 ````json
 {
-  "name": "konro-db",
+  "name": "konro",
   "module": "src/index.ts",
   "type": "module",
   "devDependencies": {
@@ -2137,109 +2141,6 @@ export type KRecord = Record<string, unknown>;
   },
   "include": ["src/**/*", "test/**/*"],
   "exclude": ["dist/**/*"]
-}
-````
-
-## File: src/schema.ts
-````typescript
-// --- TYPE UTILITIES ---
-type Pretty<T> = { [K in keyof T]: T[K] } & {};
-
-// --- CORE DEFINITIONS ---
-
-export interface ColumnOptions<T> {
-  unique?: boolean;
-  default?: T | (() => T);
-}
-
-export interface StringColumnOptions extends ColumnOptions<string> {
-  min?: number;
-  max?: number;
-  format?: 'email' | 'uuid' | 'url';
-}
-
-export interface NumberColumnOptions extends ColumnOptions<number> {
-  min?: number;
-  max?: number;
-  type?: 'integer';
-}
-
-export interface ColumnDefinition<T> {
-  _type: 'column';
-  dataType: 'id' | 'string' | 'number' | 'boolean' | 'date' | 'object';
-  options?: T extends string
-    ? StringColumnOptions
-    : T extends number
-    ? NumberColumnOptions
-    : ColumnOptions<T>;
-  _tsType: T; // For TypeScript inference only
-}
-
-export interface RelationDefinition {
-  _type: 'relation';
-  relationType: 'one' | 'many';
-  targetTable: string;
-  on: string;
-  references: string;
-}
-
-// --- TYPE INFERENCE MAGIC ---
-
-type BaseModels<TTables extends Record<string, Record<string, ColumnDefinition<any>>>> = {
-  [TableName in keyof TTables]: {
-    [ColumnName in keyof TTables[TableName]]: TTables[TableName][ColumnName]['_tsType'];
-  };
-};
-
-type WithRelations<
-  TBaseModels extends Record<string, any>,
-  TRelations extends Record<string, Record<string, RelationDefinition>>
-> = {
-    [TableName in keyof TBaseModels]: TBaseModels[TableName] & (TableName extends keyof TRelations ? {
-      [RelationName in keyof TRelations[TableName]]?: TRelations[TableName][RelationName]['relationType'] extends 'one'
-      ? TBaseModels[TRelations[TableName][RelationName]['targetTable']] | null
-      : TBaseModels[TRelations[TableName][RelationName]['targetTable']][];
-    } : {});
-  };
-
-export interface KonroSchema<
-  TTables extends Record<string, Record<string, ColumnDefinition<any>>>,
-  TRelations extends Record<string, Record<string, RelationDefinition>>
-> {
-  tables: TTables;
-  relations: TRelations;
-  types: Pretty<WithRelations<BaseModels<TTables>, TRelations>>;
-}
-
-// --- SCHEMA HELPERS ---
-
-export const id = (): ColumnDefinition<number> => ({ _type: 'column', dataType: 'id', options: { unique: true }, _tsType: 0 });
-export const string = (options?: StringColumnOptions): ColumnDefinition<string> => ({ _type: 'column', dataType: 'string', options, _tsType: '' });
-export const number = (options?: NumberColumnOptions): ColumnDefinition<number> => ({ _type: 'column', dataType: 'number', options, _tsType: 0 });
-export const boolean = (options?: ColumnOptions<boolean>): ColumnDefinition<boolean> => ({ _type: 'column', dataType: 'boolean', options, _tsType: false });
-export const date = (options?: ColumnOptions<Date>): ColumnDefinition<Date> => ({ _type: 'column', dataType: 'date', options, _tsType: new Date() });
-export const object = <T extends Record<string, any>>(options?: ColumnOptions<T>): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options, _tsType: undefined! });
-
-export const one = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'one', targetTable, ...options });
-export const many = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'many', targetTable, ...options });
-
-// --- SCHEMA BUILDER ---
-
-type SchemaInputDef<T> = {
-  tables: T;
-  relations?: (tables: T) => Record<string, Record<string, RelationDefinition>>;
-};
-
-export function createSchema<const TDef extends SchemaInputDef<Record<string, Record<string, ColumnDefinition<any>>>>>(definition: TDef) {
-  const relations = definition.relations ? definition.relations(definition.tables) : {};
-  return {
-    tables: definition.tables,
-    relations,
-    types: null as any, // This is a runtime placeholder for the inferred types
-  } as KonroSchema<
-    TDef['tables'],
-    TDef['relations'] extends (...args: any) => any ? ReturnType<TDef['relations']> : {}
-  >;
 }
 ````
 
@@ -2450,11 +2351,120 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
 };
 ````
 
+## File: src/schema.ts
+````typescript
+// --- TYPE UTILITIES ---
+type Pretty<T> = { [K in keyof T]: T[K] } & {};
+
+// --- CORE DEFINITIONS ---
+
+export interface ColumnOptions<T> {
+  unique?: boolean;
+  default?: T | (() => T);
+}
+
+export interface StringColumnOptions extends ColumnOptions<string> {
+  min?: number;
+  max?: number;
+  format?: 'email' | 'uuid' | 'url';
+}
+
+export interface NumberColumnOptions extends ColumnOptions<number> {
+  min?: number;
+  max?: number;
+  type?: 'integer';
+}
+
+export interface ColumnDefinition<T> {
+  _type: 'column';
+  dataType: 'id' | 'string' | 'number' | 'boolean' | 'date' | 'object';
+  options?: ColumnOptions<T>;
+  _tsType: T; // For TypeScript inference only
+}
+
+export interface StringColumnDefinition extends ColumnDefinition<string> {
+  dataType: 'string';
+  options?: StringColumnOptions;
+}
+
+export interface NumberColumnDefinition extends ColumnDefinition<number> {
+  dataType: 'number';
+  options?: NumberColumnOptions;
+}
+
+export interface RelationDefinition {
+  _type: 'relation';
+  relationType: 'one' | 'many';
+  targetTable: string;
+  on: string;
+  references: string;
+}
+
+// --- TYPE INFERENCE MAGIC ---
+
+type BaseModels<TTables extends Record<string, Record<string, ColumnDefinition<any>>>> = {
+  [TableName in keyof TTables]: {
+    [ColumnName in keyof TTables[TableName]]: TTables[TableName][ColumnName]['_tsType'];
+  };
+};
+
+type WithRelations<
+  TBaseModels extends Record<string, any>,
+  TRelations extends Record<string, Record<string, RelationDefinition>>
+> = {
+    [TableName in keyof TBaseModels]: TBaseModels[TableName] & (TableName extends keyof TRelations ? {
+      [RelationName in keyof TRelations[TableName]]?: TRelations[TableName][RelationName]['relationType'] extends 'one'
+      ? TBaseModels[TRelations[TableName][RelationName]['targetTable']] | null
+      : TBaseModels[TRelations[TableName][RelationName]['targetTable']][];
+    } : {});
+  };
+
+export interface KonroSchema<
+  TTables extends Record<string, Record<string, ColumnDefinition<any>>>,
+  TRelations extends Record<string, Record<string, RelationDefinition>>
+> {
+  tables: TTables;
+  relations: TRelations;
+  types: Pretty<WithRelations<BaseModels<TTables>, TRelations>>;
+}
+
+// --- SCHEMA HELPERS ---
+
+export const id = (): ColumnDefinition<number> => ({ _type: 'column', dataType: 'id', options: { unique: true }, _tsType: 0 });
+export const string = (options?: StringColumnOptions): StringColumnDefinition => ({ _type: 'column', dataType: 'string', options, _tsType: '' });
+export const number = (options?: NumberColumnOptions): NumberColumnDefinition => ({ _type: 'column', dataType: 'number', options, _tsType: 0 });
+export const boolean = (options?: ColumnOptions<boolean>): ColumnDefinition<boolean> => ({ _type: 'column', dataType: 'boolean', options, _tsType: false });
+export const date = (options?: ColumnOptions<Date>): ColumnDefinition<Date> => ({ _type: 'column', dataType: 'date', options, _tsType: new Date() });
+export const object = <T extends Record<string, any>>(options?: ColumnOptions<T>): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options, _tsType: undefined! });
+
+export const one = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'one', targetTable, ...options });
+export const many = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'many', targetTable, ...options });
+
+// --- SCHEMA BUILDER ---
+
+type SchemaInputDef<T> = {
+  tables: T;
+  relations?: (tables: T) => Record<string, Record<string, RelationDefinition>>;
+};
+
+export function createSchema<const TDef extends SchemaInputDef<any>>(definition: TDef) {
+  const relations = definition.relations ? definition.relations(definition.tables) : {};
+  return {
+    tables: definition.tables,
+    relations,
+    types: null as any, // This is a runtime placeholder for the inferred types
+  } as KonroSchema<
+    TDef['tables'],
+    TDef['relations'] extends (...args: any) => any ? ReturnType<TDef['relations']> : {}
+  >;
+}
+````
+
 ## File: src/operations.ts
 ````typescript
 import { DatabaseState, KRecord } from './types';
 import { KonroSchema, RelationDefinition } from './schema';
-import { KonroError } from './utils/error.util';
+import { KonroError, KonroValidationError } from './utils/error.util';
 
 // --- HELPERS ---
 
@@ -2558,6 +2568,7 @@ export const _insertImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
   const tableState = newState[tableName];
   if (!tableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
   const tableSchema = schema.tables[tableName];
+  if (!tableSchema) throw KonroError(`Schema for table "${tableName}" not found.`);
   const insertedRecords: KRecord[] = [];
 
   for (const value of values) {
@@ -2573,6 +2584,10 @@ export const _insertImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
         newRecord[colName] = typeof colDef.options.default === 'function' ? colDef.options.default() : colDef.options.default;
       }
     }
+
+    // Validate the record before inserting
+    validateRecord(newRecord, tableSchema, tableState.records);
+
     tableState.records.push(newRecord);
     insertedRecords.push(newRecord);
   }
@@ -2586,19 +2601,31 @@ export const _updateImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
   const newState = structuredClone(state);
   const tableState = newState[tableName];
   if (!tableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
+
+  const tableSchema = schema.tables[tableName];
+  if (!tableSchema) {
+    throw KonroError(`Schema for table "${tableName}" not found.`);
+  }
+
   const updatedRecords: KRecord[] = [];
 
   const updateData = { ...data };
   // Find the ID column from the schema and prevent it from being updated.
-  const idColumn = Object.entries(schema.tables[tableName] ?? {}).find(([, colDef]) => colDef.dataType === 'id')?.[0]
+  const idColumn = Object.entries(tableSchema).find(([, colDef]) => {
+    return colDef && typeof colDef === 'object' && '_type' in colDef && colDef._type === 'column' && 'dataType' in colDef && colDef.dataType === 'id';
+  })?.[0];
   if (idColumn && updateData[idColumn] !== undefined) {
     delete updateData[idColumn];
   }
 
-
   tableState.records = tableState.records.map(record => {
     if (predicate(record)) {
       const updatedRecord = { ...record, ...updateData };
+
+      // Validate the updated record, excluding current record from unique checks
+      const otherRecords = tableState.records.filter(r => r !== record);
+      validateRecord(updatedRecord, tableSchema, otherRecords);
+
       updatedRecords.push(updatedRecord);
       return updatedRecord;
     }
@@ -2627,5 +2654,60 @@ export const _deleteImpl = (state: DatabaseState, tableName: string, predicate: 
 
   tableState.records = keptRecords;
   return [newState, deletedRecords];
+};
+
+// --- VALIDATION ---
+
+const validateRecord = (record: KRecord, tableSchema: Record<string, any>, existingRecords: KRecord[]): void => {
+  for (const [columnName, colDef] of Object.entries(tableSchema)) {
+    if (!colDef || typeof colDef !== 'object' || !('dataType' in colDef)) continue;
+
+    const value = record[columnName];
+    const options = colDef.options || {};
+
+    // Skip validation for undefined values (they should have defaults applied already)
+    if (value === undefined) continue;
+
+    // Validate unique constraint
+    if (options.unique && existingRecords.some(r => r[columnName] === value)) {
+      throw KonroValidationError(`Value '${value}' for column '${columnName}' must be unique`);
+    }
+
+    // Validate string constraints
+    if (colDef.dataType === 'string' && typeof value === 'string') {
+      // Min length
+      if (options.min !== undefined && value.length < options.min) {
+        throw KonroValidationError(`String '${value}' for column '${columnName}' is too short (min: ${options.min})`);
+      }
+
+      // Max length
+      if (options.max !== undefined && value.length > options.max) {
+        throw KonroValidationError(`String '${value}' for column '${columnName}' is too long (max: ${options.max})`);
+      }
+
+      // Format validation
+      if (options.format === 'email' && !isValidEmail(value)) {
+        throw KonroValidationError(`Value '${value}' for column '${columnName}' is not a valid email`);
+      }
+    }
+
+    // Validate number constraints
+    if (colDef.dataType === 'number' && typeof value === 'number') {
+      // Min value
+      if (options.min !== undefined && value < options.min) {
+        throw KonroValidationError(`Number ${value} for column '${columnName}' is too small (min: ${options.min})`);
+      }
+
+      // Max value
+      if (options.max !== undefined && value > options.max) {
+        throw KonroValidationError(`Number ${value} for column '${columnName}' is too large (max: ${options.max})`);
+      }
+    }
+  }
+};
+
+const isValidEmail = (email: string): boolean => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
 };
 ````

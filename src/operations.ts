@@ -1,5 +1,5 @@
 import { DatabaseState, KRecord } from './types';
-import { KonroSchema, RelationDefinition } from './schema';
+import { KonroSchema, RelationDefinition, ColumnDefinition } from './schema';
 import { KonroError, KonroValidationError } from './utils/error.util';
 
 // --- HELPERS ---
@@ -18,9 +18,9 @@ export const createEmptyState = (schema: KonroSchema<any, any>): DatabaseState =
 
 export interface QueryDescriptor {
   tableName: string;
-  select?: (keyof KRecord)[];
+  select?: Record<string, ColumnDefinition<unknown> | RelationDefinition>;
   where?: (record: KRecord) => boolean;
-  with?: Record<string, boolean | { where?: (record: KRecord) => boolean }>;
+  with?: Record<string, boolean | { select?: Record<string, ColumnDefinition<unknown>>; where?: (record: KRecord) => boolean }>;
   limit?: number;
   offset?: number;
 }
@@ -44,12 +44,34 @@ export const _queryImpl = <S extends KonroSchema<any, any>>(state: DatabaseState
 
         const withOpts = descriptor.with[relationName];
         const nestedWhere = typeof withOpts === 'object' ? withOpts.where : undefined;
+        const nestedSelect = typeof withOpts === 'object' ? withOpts.select : undefined;
 
-        const filteredRelatedRecords = nestedWhere ? relatedRecords.filter(nestedWhere) : relatedRecords;
+        let processedRecords = nestedWhere ? relatedRecords.filter(nestedWhere) : relatedRecords;
+
+        if (nestedSelect) {
+          const targetTableSchema = schema.tables[relationDef.targetTable];
+          if (!targetTableSchema) throw KonroError(`Schema for table "${relationDef.targetTable}" not found.`);
+
+          processedRecords = processedRecords.map(rec => {
+            const newRec: KRecord = {};
+            for (const outputKey in nestedSelect) {
+              const def = nestedSelect[outputKey];
+              if (!def) continue;
+              // nested with() does not support selecting relations, only columns, as per spec.
+              if (def._type === 'column') {
+                  const colName = Object.keys(targetTableSchema).find(key => targetTableSchema[key] === def);
+                  if (colName && rec.hasOwnProperty(colName)) {
+                      newRec[outputKey] = rec[colName];
+                  }
+              }
+            }
+            return newRec;
+          });
+        }
         if (relationDef.relationType === 'one') {
-          record[relationName] = filteredRelatedRecords[0] ?? null;
+          record[relationName] = processedRecords[0] ?? null;
         } else {
-          record[relationName] = filteredRelatedRecords;
+          record[relationName] = processedRecords;
         }
       }
     }
@@ -62,12 +84,25 @@ export const _queryImpl = <S extends KonroSchema<any, any>>(state: DatabaseState
 
   // 4. Select Fields
   if (descriptor.select) {
+    const tableSchema = schema.tables[descriptor.tableName];
+    const relationsSchema = schema.relations[descriptor.tableName] ?? {};
+    if (!tableSchema) throw KonroError(`Schema for table "${descriptor.tableName}" not found.`);
+
     paginatedResults = paginatedResults.map(rec => {
       const newRec: KRecord = {};
-      for (const key of descriptor.select!) {
-        // This includes keys from `with` if the user explicitly adds them to select.
-        if (rec.hasOwnProperty(key)) {
-          newRec[key] = rec[key];
+      for (const outputKey in descriptor.select!) {
+        const def = descriptor.select![outputKey];
+        if (!def) continue;
+        if (def._type === 'column') {
+            const colName = Object.keys(tableSchema).find(key => tableSchema[key] === def);
+            if (colName && rec.hasOwnProperty(colName)) {
+                newRec[outputKey] = rec[colName];
+            }
+        } else if (def._type === 'relation') {
+            const relName = Object.keys(relationsSchema).find(key => relationsSchema[key] === def);
+            if (relName && rec.hasOwnProperty(relName)) {
+                newRec[outputKey] = rec[relName];
+            }
         }
       }
       return newRec;
@@ -206,7 +241,7 @@ const validateRecord = (record: KRecord, tableSchema: Record<string, any>, exist
 
     // Validate unique constraint
     if (options.unique && existingRecords.some(r => r[columnName] === value)) {
-      throw KonroValidationError(`Value '${value}' for column '${columnName}' must be unique`);
+      throw KonroValidationError(`Value '${String(value)}' for column '${columnName}' must be unique`);
     }
 
     // Validate string constraints

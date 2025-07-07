@@ -86,6 +86,27 @@ describe('Unit > Core > Query-With', () => {
         expect(posts[0]!.id).toBe(12);
     });
 
+    it('should select nested fields within a .with() clause', () => {
+        const results = _queryImpl(testState, testSchema, {
+            tableName: 'users',
+            where: r => r.id === 1,
+            with: {
+                posts: {
+                    select: {
+                        postTitle: testSchema.tables.posts.title
+                    }
+                }
+            }
+        });
+
+        expect(results.length).toBe(1);
+        const user = results[0]!;
+        const posts = user.posts as {postTitle: unknown}[];
+        expect(posts).toBeDefined();
+        expect(posts.length).toBe(2);
+        expect(posts[0]!).toEqual({ postTitle: 'Alice Post 1' });
+    });
+
     it('should handle multiple relations at once', () => {
         const results = _queryImpl(testState, testSchema, {
             tableName: 'users',

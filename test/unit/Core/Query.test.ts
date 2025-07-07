@@ -32,7 +32,13 @@ describe('Unit > Core > Query', () => {
     });
 
     it('should select only the specified fields when using .select()', () => {
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', select: ['name', 'age'] });
+        const results = _queryImpl(testState, testSchema, {
+            tableName: 'users',
+            select: {
+                name: testSchema.tables.users.name,
+                age: testSchema.tables.users.age
+            }
+        });
         expect(results.length).toBe(4);
         expect(results[0]!).toEqual({ name: 'Alice', age: 30 });
         expect(Object.keys(results[0]!).length).toBe(2);

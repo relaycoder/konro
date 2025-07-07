@@ -1,4 +1,4 @@
-import { KonroSchema } from './schema';
+import { ColumnDefinition, KonroSchema, RelationDefinition } from './schema';
 import { StorageAdapter } from './adapter';
 import { DatabaseState, KRecord } from './types';
 import { _queryImpl, _insertImpl, _updateImpl, _deleteImpl, createEmptyState as createEmptyStateImpl, QueryDescriptor } from './operations';
@@ -15,7 +15,7 @@ const normalizePredicate = <T extends KRecord>(
 // --- TYPE-SAFE FLUENT API BUILDERS ---
 
 interface ChainedQueryBuilder<T> {
-  select(fields: (keyof T)[]): this;
+  select(fields: Record<string, ColumnDefinition<unknown> | RelationDefinition>): this;
   where(predicate: Partial<T> | ((record: T) => boolean)): this;
   with(relations: QueryDescriptor['with']): this;
   limit(count: number): this;
@@ -30,12 +30,12 @@ interface QueryBuilder<S extends KonroSchema<any, any>> {
 
 interface UpdateBuilder<T> {
   set(data: Partial<T>): {
-    where(predicate: Partial<T> | ((record: T) => boolean)): [DatabaseState, T[]];
+    where(predicate: Partial<T> | ((record: T) => boolean)): Promise<[DatabaseState, T[]]>;
   };
 }
 
 interface DeleteBuilder<T> {
-  where(predicate: Partial<T> | ((record: T) => boolean)): [DatabaseState, T[]];
+  where(predicate: Partial<T> | ((record: T) => boolean)): Promise<[DatabaseState, T[]]>;
 }
 
 export interface DbContext<S extends KonroSchema<any, any>> {
@@ -74,7 +74,7 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
 
         const builder: ChainedQueryBuilder<S['types'][T]> = {
           select: (fields) => {
-            descriptor.select = fields as string[];
+            descriptor.select = fields;
             return builder;
           },
           where: (predicate) => {
@@ -102,7 +102,7 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
 
     update: <T extends keyof S['tables']>(state: DatabaseState, tableName: T): UpdateBuilder<S['types'][T]> => ({
       set: (data) => ({
-        where: (predicate) => {
+        where: async (predicate) => {
           const [newState, updatedRecords] = _updateImpl(state, schema, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate));
           return [newState, updatedRecords as S['types'][T][]];
         },
@@ -110,7 +110,7 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
     }),
 
     delete: <T extends keyof S['tables']>(state: DatabaseState, tableName: T): DeleteBuilder<S['types'][T]> => ({
-      where: (predicate) => {
+      where: async (predicate) => {
         const [newState, deletedRecords] = _deleteImpl(state, tableName as string, normalizePredicate(predicate));
         return [newState, deletedRecords as S['types'][T][]];
       },

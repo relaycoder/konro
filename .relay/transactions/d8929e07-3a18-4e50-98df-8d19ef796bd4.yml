@@ -2152,4 +2152,4 @@ snapshot:
       tableState.records = keptRecords;
       return [newState, deletedRecords];
     };
-approved: false
+approved: true

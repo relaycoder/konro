@@ -12,6 +12,16 @@ describe('Unit > Schema > ColumnHelpers', () => {
     });
   });
 
+  it('should create a valid string column definition with no options', () => {
+    const stringCol = konro.string();
+    expect(stringCol).toEqual({
+      _type: 'column',
+      dataType: 'string',
+      options: undefined,
+      _tsType: '',
+    });
+  });
+
   it('should create a valid string column definition with all specified options', () => {
     const defaultFn = () => 'default';
     const stringCol = konro.string({
@@ -32,6 +42,16 @@ describe('Unit > Schema > ColumnHelpers', () => {
         format: 'email',
       },
       _tsType: '',
+    });
+  });
+
+  it('should create a valid number column definition with no options', () => {
+    const numberCol = konro.number();
+    expect(numberCol).toEqual({
+      _type: 'column',
+      dataType: 'number',
+      options: undefined,
+      _tsType: 0,
     });
   });
 
@@ -57,6 +77,16 @@ describe('Unit > Schema > ColumnHelpers', () => {
     });
   });
 
+  it('should create a valid boolean column with no options', () => {
+    const boolCol = konro.boolean();
+    expect(boolCol).toEqual({
+      _type: 'column',
+      dataType: 'boolean',
+      options: undefined,
+      _tsType: false,
+    });
+  });
+
   it('should create a valid boolean column definition with a default value', () => {
     const boolCol = konro.boolean({ default: false });
     expect(boolCol).toEqual({
@@ -64,6 +94,16 @@ describe('Unit > Schema > ColumnHelpers', () => {
       dataType: 'boolean',
       options: { default: false },
       _tsType: false,
+    });
+  });
+
+  it('should create a valid date column definition with no options', () => {
+    const dateCol = konro.date();
+    expect(dateCol).toEqual({
+      _type: 'column',
+      dataType: 'date',
+      options: undefined,
+      _tsType: expect.any(Date),
     });
   });
 
@@ -77,6 +117,44 @@ describe('Unit > Schema > ColumnHelpers', () => {
       _tsType: expect.any(Date),
     });
     expect(dateCol.options?.default).toBe(defaultDateFn);
+  });
+
+  it('should create a valid string column with a literal default', () => {
+    const stringCol = konro.string({ default: 'hello' });
+    expect(stringCol).toEqual({
+      _type: 'column',
+      dataType: 'string',
+      options: { default: 'hello' },
+      _tsType: '',
+    });
+  });
+
+  it('should create a valid number column with a function default', () => {
+    const defaultFn = () => 42;
+    const numberCol = konro.number({ default: defaultFn });
+    expect(numberCol).toEqual({
+      _type: 'column',
+      dataType: 'number',
+      options: {
+        default: defaultFn,
+      },
+      _tsType: 0,
+    });
+    expect(numberCol.options?.default).toBe(defaultFn);
+  });
+
+  it('should create a valid boolean column with a function default', () => {
+    const defaultFn = () => true;
+    const boolCol = konro.boolean({ default: defaultFn });
+    expect(boolCol).toEqual({
+      _type: 'column',
+      dataType: 'boolean',
+      options: {
+        default: defaultFn,
+      },
+      _tsType: false,
+    });
+    expect(boolCol.options?.default).toBe(defaultFn);
   });
 
   it('should create a valid object column definition', () => {

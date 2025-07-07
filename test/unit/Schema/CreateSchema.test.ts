@@ -49,4 +49,43 @@ describe('Unit > Schema > CreateSchema', () => {
     expect(schema.tables).toBe(tableDefs);
     expect(schema.relations).toEqual({});
   });
+
+  it('should handle schemas where relations function returns an empty object', () => {
+    const tableDefs = {
+      users: {
+        id: konro.id(),
+        name: konro.string(),
+      },
+    };
+
+    const schema = konro.createSchema({
+      tables: tableDefs,
+      relations: () => ({}),
+    });
+
+    expect(schema.tables).toBe(tableDefs);
+    expect(schema.relations).toEqual({});
+  });
+
+  it('should handle schemas with multiple relations on one table', () => {
+    const tableDefs = {
+      users: { id: konro.id(), name: konro.string() },
+      posts: { id: konro.id(), title: konro.string(), authorId: konro.number(), editorId: konro.number() },
+    };
+
+    const schema = konro.createSchema({
+      tables: tableDefs,
+      relations: () => ({
+        posts: {
+          author: konro.one('users', { on: 'authorId', references: 'id' }),
+          editor: konro.one('users', { on: 'editorId', references: 'id' }),
+        },
+      }),
+    });
+
+    expect(schema.relations.posts.author).toBeDefined();
+    expect(schema.relations.posts.editor).toBeDefined();
+    expect(schema.relations.posts.author.targetTable).toBe('users');
+    expect(schema.relations.posts.editor.targetTable).toBe('users');
+  });
 });

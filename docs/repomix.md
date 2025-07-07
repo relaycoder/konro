@@ -17,19 +17,10 @@ src/
   types.ts
 test/
   unit/
-    Core/
-      Delete.test.ts
-      Insert.test.ts
-      Query-With.test.ts
-      Query.test.ts
-      Update.test.ts
     Schema/
       ColumnHelpers.test.ts
       CreateSchema.test.ts
       RelationHelpers.test.ts
-    Validation/
-      Constraints.test.ts
-  util.ts
 package.json
 README.md
 tsconfig.json
@@ -945,512 +936,6 @@ export type DatabaseState = {
 export type KRecord = Record<string, unknown>;
 ````
 
-## File: test/unit/Core/Delete.test.ts
-````typescript
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { _deleteImpl } from '../../../src/operations';
-import { DatabaseState } from '../../../src/types';
-
-describe('Unit > Core > Delete', () => {
-    let testState: DatabaseState;
-
-    beforeEach(() => {
-        testState = {
-            users: {
-                records: [
-                    { id: 1, name: 'Alice', email: 'a@a.com', age: 30 },
-                    { id: 2, name: 'Bob', email: 'b@b.com', age: 25 },
-                    { id: 3, name: 'Charlie', email: 'c@c.com', age: 42 },
-                ],
-                meta: { lastId: 3 },
-            },
-            posts: { records: [], meta: { lastId: 0 } },
-            profiles: { records: [], meta: { lastId: 0 } },
-            tags: { records: [], meta: { lastId: 0 } },
-            posts_tags: { records: [], meta: { lastId: 0 } },
-        };
-    });
-
-    it('should return a new state object, not mutate the original state, on delete', () => {
-        const originalState = structuredClone(testState);
-        const [newState] = _deleteImpl(testState, 'users', (r) => r.id === 1);
-        
-        expect(newState).not.toBe(originalState);
-        expect(originalState.users!.records.length).toBe(3);
-        expect(newState.users!.records.length).toBe(2);
-    });
-
-    it('should only delete records that match the predicate function', () => {
-        const [newState, deleted] = _deleteImpl(testState, 'users', (r) => typeof r.age === 'number' && r.age > 35);
-        
-        expect(deleted.length).toBe(1);
-        expect(deleted[0]!.id).toBe(3);
-        expect(newState.users!.records.length).toBe(2);
-        expect(newState.users!.records.find(u => u.id === 3)).toBeUndefined();
-    });
-
-    it('should return both the new state and an array of the full, deleted records in the result tuple', () => {
-        const [newState, deleted] = _deleteImpl(testState, 'users', (r) => r.id === 2);
-
-        expect(newState).toBeDefined();
-        expect(deleted).toBeInstanceOf(Array);
-        expect(deleted.length).toBe(1);
-        expect(deleted[0]!).toEqual({ id: 2, name: 'Bob', email: 'b@b.com', age: 25 });
-    });
-
-    it('should not modify the table meta lastId on delete', () => {
-        const [newState] = _deleteImpl(testState, 'users', (r) => r.id === 3);
-        expect(newState.users!.meta.lastId).toBe(3);
-    });
-});
-````
-
-## File: test/unit/Core/Insert.test.ts
-````typescript
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { testSchema } from '../../util';
-import { _insertImpl } from '../../../src/operations';
-import { DatabaseState } from '../../../src/types';
-
-describe('Unit > Core > Insert', () => {
-    let emptyState: DatabaseState;
-
-    beforeEach(() => {
-        emptyState = {
-            users: { records: [], meta: { lastId: 0 } },
-            posts: { records: [], meta: { lastId: 10 } },
-            profiles: { records: [], meta: { lastId: 0 } },
-            tags: { records: [], meta: { lastId: 0 } },
-            posts_tags: { records: [], meta: { lastId: 0 } },
-        };
-    });
-
-    it('should return a new state object, not mutate the original state, on insert', () => {
-        const originalState = structuredClone(emptyState);
-        const [newState] = _insertImpl(emptyState, testSchema, 'users', [{ name: 'Test', email: 'test@test.com', age: 25 }]);
-        
-        expect(newState).not.toBe(originalState);
-        expect(originalState.users!.records.length).toBe(0);
-        expect(newState.users!.records.length).toBe(1);
-    });
-
-    it('should correctly increment the lastId in the table meta', () => {
-        const [newState] = _insertImpl(emptyState, testSchema, 'users', [{ name: 'Test', email: 'test@test.com', age: 25 }]);
-        expect(newState.users!.meta.lastId).toBe(1);
-
-        const [finalState] = _insertImpl(newState, testSchema, 'users', [{ name: 'Test2', email: 'test2@test.com', age: 30 }]);
-        expect(finalState.users!.meta.lastId).toBe(2);
-    });
-
-    it('should assign the new id to the inserted record', () => {
-        const [newState, inserted] = _insertImpl(emptyState, testSchema, 'posts', [{ title: 'My Post', content: '...', authorId: 1 }]);
-        expect(newState.posts!.meta.lastId).toBe(11);
-        expect(inserted[0]!.id).toBe(11);
-        expect(newState.posts!.records[0]!.id).toBe(11);
-    });
-
-    it('should apply default values for fields that are not provided', () => {
-        const [newState, inserted] = _insertImpl(emptyState, testSchema, 'users', [{ name: 'Default User', email: 'default@test.com', age: 30 }]);
-        expect(inserted[0]!.isActive).toBe(true);
-        expect(newState.users!.records[0]!.isActive).toBe(true);
-    });
-
-    it('should apply default values from a function call, like for dates', () => {
-        const before = new Date();
-        const [newState, inserted] = _insertImpl(emptyState, testSchema, 'posts', [{ title: 'Dated Post', content: '...', authorId: 1 }]);
-        const after = new Date();
-
-        const publishedAt = inserted[0]!.publishedAt as Date;
-        expect(publishedAt).toBeInstanceOf(Date);
-        expect(publishedAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
-        expect(publishedAt.getTime()).toBeLessThanOrEqual(after.getTime());
-        expect(newState.posts!.records[0]!.publishedAt).toEqual(publishedAt);
-    });
-
-    it('should successfully insert multiple records in a single call', () => {
-        const usersToInsert = [
-            { name: 'User A', email: 'a@test.com', age: 21 },
-            { name: 'User B', email: 'b@test.com', age: 22 },
-        ];
-        const [newState, inserted] = _insertImpl(emptyState, testSchema, 'users', usersToInsert);
-
-        expect(newState.users!.records.length).toBe(2);
-        expect(inserted.length).toBe(2);
-        expect(newState.users!.meta.lastId).toBe(2);
-        expect(inserted[0]!.id).toBe(1);
-        expect(inserted[1]!.id).toBe(2);
-        expect(inserted[0]!.name).toBe('User A');
-        expect(inserted[1]!.name).toBe('User B');
-    });
-
-    it('should return both the new state and the newly created record(s) in the result tuple', () => {
-        const userToInsert = { name: 'Single', email: 'single@test.com', age: 40 };
-        const [newState, inserted] = _insertImpl(emptyState, testSchema, 'users', [userToInsert]);
-        
-        expect(newState).toBeDefined();
-        expect(inserted).toBeInstanceOf(Array);
-        expect(inserted.length).toBe(1);
-        expect(inserted[0]!.name).toBe('Single');
-        expect(inserted[0]!.id).toBe(1);
-    });
-});
-````
-
-## File: test/unit/Core/Query-With.test.ts
-````typescript
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { testSchema } from '../../util';
-import { _queryImpl } from '../../../src/operations';
-import { DatabaseState } from '../../../src/types';
-
-describe('Unit > Core > Query-With', () => {
-    let testState: DatabaseState;
-
-    beforeEach(() => {
-        testState = {
-            users: {
-                records: [
-                    { id: 1, name: 'Alice' },
-                    { id: 2, name: 'Bob' },
-                ],
-                meta: { lastId: 2 },
-            },
-            posts: {
-                records: [
-                    { id: 10, title: 'Alice Post 1', authorId: 1 },
-                    { id: 11, title: 'Bob Post 1', authorId: 2 },
-                    { id: 12, title: 'Alice Post 2', authorId: 1 },
-                ],
-                meta: { lastId: 12 },
-            },
-            profiles: {
-                records: [
-                    { id: 100, bio: 'Bio for Alice', userId: 1 },
-                ],
-                meta: { lastId: 100 },
-            },
-            tags: { records: [], meta: { lastId: 0 } },
-            posts_tags: { records: [], meta: { lastId: 0 } },
-        };
-    });
-
-    it('should resolve a `one` relationship and attach it to the parent record', () => {
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'posts',
-            where: r => r.id === 10,
-            with: { author: true }
-        });
-
-        expect(results.length).toBe(1);
-        const post = results[0]!;
-        expect(post).toBeDefined();
-        const author = post.author as {id: unknown, name: unknown};
-        expect(author).toBeDefined();
-        expect(author.id).toBe(1);
-        expect(author.name).toBe('Alice');
-    });
-
-    it('should resolve a `many` relationship and attach it as an array', () => {
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'users',
-            where: r => r.id === 1,
-            with: { posts: true }
-        });
-
-        expect(results.length).toBe(1);
-        const user = results[0]!;
-        expect(user).toBeDefined();
-        const posts = user.posts as {title: unknown}[];
-        expect(posts).toBeInstanceOf(Array);
-        expect(posts.length).toBe(2);
-        expect(posts[0]!.title).toBe('Alice Post 1');
-        expect(posts[1]!.title).toBe('Alice Post 2');
-    });
-
-    it('should filter nested records within a .with() clause', () => {
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'users',
-            where: r => r.id === 1,
-            with: {
-                posts: {
-                    where: (post) => typeof post.title === 'string' && post.title.includes('Post 2')
-                }
-            }
-        });
-
-        expect(results.length).toBe(1);
-        const user = results[0]!;
-        const posts = user.posts as {id: unknown}[];
-        expect(posts).toBeDefined();
-        expect(posts.length).toBe(1);
-        expect(posts[0]!.id).toBe(12);
-    });
-
-    it('should select nested fields within a .with() clause', () => {
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'users',
-            where: r => r.id === 1,
-            with: {
-                posts: {
-                    select: {
-                        postTitle: testSchema.tables.posts.title
-                    }
-                }
-            }
-        });
-
-        expect(results.length).toBe(1);
-        const user = results[0]!;
-        const posts = user.posts as {postTitle: unknown}[];
-        expect(posts).toBeDefined();
-        expect(posts.length).toBe(2);
-        expect(posts[0]!).toEqual({ postTitle: 'Alice Post 1' });
-    });
-
-    it('should handle multiple relations at once', () => {
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'users',
-            where: r => r.id === 1,
-            with: {
-                posts: true,
-                profile: true
-            }
-        });
-        
-        expect(results.length).toBe(1);
-        const user = results[0]!;
-        const posts = user.posts as unknown[];
-        const profile = user.profile as { bio: unknown };
-        expect(posts).toBeInstanceOf(Array);
-        expect(posts.length).toBe(2);
-        expect(profile).toBeDefined();
-        expect(profile.bio).toBe('Bio for Alice');
-    });
-
-    it('should return null for a `one` relation if no related record is found', () => {
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'users',
-            where: r => r.id === 2, // Bob has no profile
-            with: { profile: true }
-        });
-
-        expect(results.length).toBe(1);
-        const user = results[0]!;
-        expect(user.profile).toBeNull();
-    });
-
-    it('should return an empty array for a `many` relation if no related records are found', () => {
-        // Add a user with no posts
-        testState.users!.records.push({ id: 3, name: 'Charlie' });
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'users',
-            where: r => r.id === 3,
-            with: { posts: true }
-        });
-
-        expect(results.length).toBe(1);
-        const user = results[0]!;
-        expect(user.posts).toBeInstanceOf(Array);
-        expect((user.posts as unknown[]).length).toBe(0);
-    });
-});
-````
-
-## File: test/unit/Core/Query.test.ts
-````typescript
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { testSchema } from '../../util';
-import { _queryImpl } from '../../../src/operations';
-import { DatabaseState } from '../../../src/types';
-
-describe('Unit > Core > Query', () => {
-    let testState: DatabaseState;
-
-    beforeEach(() => {
-        testState = {
-            users: {
-                records: [
-                    { id: 1, name: 'Alice', age: 30, isActive: true },
-                    { id: 2, name: 'Bob', age: 25, isActive: true },
-                    { id: 3, name: 'Charlie', age: 42, isActive: false },
-                    { id: 4, name: 'Denise', age: 30, isActive: true },
-                ],
-                meta: { lastId: 4 },
-            },
-            posts: { records: [], meta: { lastId: 0 } },
-            profiles: { records: [], meta: { lastId: 0 } },
-            tags: { records: [], meta: { lastId: 0 } },
-            posts_tags: { records: [], meta: { lastId: 0 } },
-        };
-    });
-
-    it('should select all fields from a table when .select() is omitted', () => {
-        const results = _queryImpl(testState, testSchema, { tableName: 'users' });
-        expect(results.length).toBe(4);
-        expect(results[0]!).toEqual({ id: 1, name: 'Alice', age: 30, isActive: true });
-        expect(Object.keys(results[0]!).length).toBe(4);
-    });
-
-    it('should select only the specified fields when using .select()', () => {
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'users',
-            select: {
-                name: testSchema.tables.users.name,
-                age: testSchema.tables.users.age
-            }
-        });
-        expect(results.length).toBe(4);
-        expect(results[0]!).toEqual({ name: 'Alice', age: 30 });
-        expect(Object.keys(results[0]!).length).toBe(2);
-    });
-
-    it('should filter records correctly using a where function', () => {
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', where: (r) => r.age === 30 });
-        expect(results.length).toBe(2);
-        expect(results[0]!.name).toBe('Alice');
-        expect(results[1]!.name).toBe('Denise');
-    });
-
-    it('should limit the number of returned records correctly using .limit()', () => {
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', limit: 2 });
-        expect(results.length).toBe(2);
-        expect(results[0]!.id).toBe(1);
-        expect(results[1]!.id).toBe(2);
-    });
-
-    it('should skip the correct number of records using .offset()', () => {
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', offset: 2 });
-        expect(results.length).toBe(2);
-        expect(results[0]!.id).toBe(3);
-        expect(results[1]!.id).toBe(4);
-    });
-
-    it('should correctly handle limit and offset together for pagination', () => {
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', offset: 1, limit: 2 });
-        expect(results.length).toBe(2);
-        expect(results[0]!.id).toBe(2);
-        expect(results[1]!.id).toBe(3);
-    });
-
-    it('should return an array of all matching records when using .all()', () => {
-        // This is implicit in _queryImpl, the test just verifies the base case
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', where: r => r.isActive === true });
-        expect(results).toBeInstanceOf(Array);
-        expect(results.length).toBe(3);
-    });
-
-    it('should return the first matching record when using .first()', () => {
-        // This is simulated by adding limit: 1
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', where: r => typeof r.age === 'number' && r.age > 28, limit: 1 });
-        expect(results.length).toBe(1);
-        expect(results[0]!.id).toBe(1);
-    });
-
-    it('should return null when .first() finds no matching record', () => {
-        // This is simulated by _queryImpl returning [] and the caller handling it
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', where: r => typeof r.age === 'number' && r.age > 50, limit: 1 });
-        expect(results.length).toBe(0);
-    });
-});
-````
-
-## File: test/unit/Core/Update.test.ts
-````typescript
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { testSchema } from '../../util';
-import { _updateImpl } from '../../../src/operations';
-import { DatabaseState } from '../../../src/types';
-
-describe('Unit > Core > Update', () => {
-    let testState: DatabaseState;
-
-    beforeEach(() => {
-        testState = {
-            users: {
-                records: [
-                    { id: 1, name: 'Alice', email: 'a@a.com', age: 30, isActive: true },
-                    { id: 2, name: 'Bob', email: 'b@b.com', age: 25, isActive: true },
-                    { id: 3, name: 'Charlie', email: 'c@c.com', age: 42, isActive: false },
-                ],
-                meta: { lastId: 3 },
-            },
-            posts: { records: [], meta: { lastId: 0 } },
-            profiles: { records: [], meta: { lastId: 0 } },
-            tags: { records: [], meta: { lastId: 0 } },
-            posts_tags: { records: [], meta: { lastId: 0 } },
-        };
-    });
-
-    it('should return a new state object, not mutate the original state, on update', () => {
-        const originalState = structuredClone(testState);
-        const [newState] = _updateImpl(testState, testSchema, 'users', { age: 31 }, (r) => r.id === 1);
-        
-        expect(newState).not.toBe(originalState);
-        expect(originalState.users!.records[0]!.age).toBe(30);
-        expect(newState.users!.records.find(u => u.id === 1)?.age).toBe(31);
-    });
-
-    it('should only update records that match the predicate function', () => {
-        const [newState, updated] = _updateImpl(testState, testSchema, 'users', { isActive: true }, (r) => r.name === 'Charlie');
-        
-        expect(updated.length).toBe(1);
-        expect(updated[0]!.id).toBe(3);
-        expect(updated[0]!.isActive).toBe(true);
-        expect(newState.users!.records.find(u => u.id === 3)?.isActive).toBe(true);
-        expect(newState.users!.records.find(u => u.id === 1)?.isActive).toBe(true); // Unchanged
-    });
-
-    it('should correctly modify the fields specified in the set payload', () => {
-        const [newState, updated] = _updateImpl(testState, testSchema, 'users', { age: 26, name: 'Robert' }, (r) => r.id === 2);
-
-        expect(updated.length).toBe(1);
-        const updatedUser = newState.users!.records.find(u => u.id === 2);
-        expect(updatedUser?.name).toBe('Robert');
-        expect(updatedUser?.age).toBe(26);
-    });
-
-    it('should not allow changing the id of an updated record', () => {
-        const payload = { id: 99, age: 50 };
-        const [newState, updated] = _updateImpl(testState, testSchema, 'users', payload, (r) => r.id === 1);
-        
-        expect(updated.length).toBe(1);
-        expect(updated[0]!.id).toBe(1); // The id should remain 1
-        expect(updated[0]!.age).toBe(50);
-        
-        const userInNewState = newState.users!.records.find(u => u.age === 50);
-        expect(userInNewState?.id).toBe(1);
-
-        const userWithOldId = newState.users!.records.find(u => u.id === 1);
-        expect(userWithOldId).toBeDefined();
-        expect(userWithOldId?.age).toBe(50);
-        
-        const userWithNewId = newState.users!.records.find(u => u.id === 99);
-        expect(userWithNewId).toBeUndefined();
-    });
-
-    it('should return an empty array of updated records if the predicate matches nothing', () => {
-        const [newState, updated] = _updateImpl(testState, testSchema, 'users', { age: 99 }, (r) => r.id === 999);
-        expect(updated.length).toBe(0);
-        expect(newState.users!.records).toEqual(testState.users!.records);
-        expect(newState).not.toBe(testState);
-    });
-
-    it('should return both the new state and an array of the full, updated records in the result tuple', () => {
-        const [newState, updated] = _updateImpl(testState, testSchema, 'users', { isActive: false }, (r) => r.id === 1);
-        expect(newState).toBeDefined();
-        expect(updated).toBeInstanceOf(Array);
-        expect(updated.length).toBe(1);
-        expect(updated[0]!).toEqual({
-            id: 1,
-            name: 'Alice',
-            email: 'a@a.com',
-            age: 30,
-            isActive: false,
-        });
-    });
-});
-````
-
 ## File: test/unit/Schema/ColumnHelpers.test.ts
 ````typescript
 import { describe, it, expect } from 'bun:test';
@@ -1543,151 +1028,6 @@ describe('Unit > Schema > ColumnHelpers', () => {
     });
   });
 });
-````
-
-## File: test/unit/Validation/Constraints.test.ts
-````typescript
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { testSchema } from '../../util';
-import { _insertImpl, _updateImpl } from '../../../src/operations';
-import { DatabaseState } from '../../../src/types';
-import { KonroValidationError } from '../../../src/utils/error.util';
-
-describe('Unit > Validation > Constraints', () => {
-    let testState: DatabaseState;
-
-    beforeEach(() => {
-        testState = {
-            users: {
-                records: [{ id: 1, name: 'Alice', email: 'alice@example.com', age: 30, isActive: true }],
-                meta: { lastId: 1 },
-            },
-            posts: { records: [], meta: { lastId: 0 } },
-            profiles: { records: [], meta: { lastId: 0 } },
-            tags: { records: [], meta: { lastId: 0 } },
-            posts_tags: { records: [], meta: { lastId: 0 } },
-        };
-    });
-
-    // NOTE: These tests are expected to fail until validation is implemented in core operations.
-    // This is intentional to highlight the missing functionality as per the test plan.
-    
-    it('should throw a KonroValidationError when inserting a record with a non-unique value', () => {
-        const user = { name: 'Bob', email: 'alice@example.com', age: 25 };
-        // This should throw because 'alice@example.com' is already used and `email` is unique.
-        expect(() => _insertImpl(testState, testSchema, 'users', [user])).toThrow(KonroValidationError);
-    });
-
-    it('should throw a KonroValidationError for a string that violates a format: email constraint', () => {
-        const user = { name: 'Bob', email: 'bob@invalid', age: 25 };
-        // This should throw because the email format is invalid.
-        expect(() => _insertImpl(testState, testSchema, 'users', [user])).toThrow(KonroValidationError);
-    });
-
-    it('should throw a KonroValidationError for a number smaller than the specified min', () => {
-        const user = { name: 'Bob', email: 'bob@example.com', age: 17 }; // age.min is 18
-        // This should throw because age is below min.
-        expect(() => _insertImpl(testState, testSchema, 'users', [user])).toThrow(KonroValidationError);
-    });
-
-    it('should throw a KonroValidationError for a string shorter than the specified min', () => {
-        const user = { name: 'B', email: 'bob@example.com', age: 25 }; // name.min is 2
-        // This should throw because name is too short.
-        expect(() => _insertImpl(testState, testSchema, 'users', [user])).toThrow(KonroValidationError);
-    });
-    
-    it('should throw a KonroValidationError on update for a non-unique value', () => {
-        // Add another user to create conflict
-        testState.users!.records.push({ id: 2, name: 'Charlie', email: 'charlie@example.com', age: 40, isActive: true });
-        testState.users!.meta.lastId = 2;
-
-        const predicate = (r: any) => r.id === 2;
-        const data = { email: 'alice@example.com' }; // Try to update charlie's email to alice's
-
-        expect(() => _updateImpl(testState, testSchema, 'users', data, predicate)).toThrow(KonroValidationError);
-    });
-});
-````
-
-## File: test/util.ts
-````typescript
-import { konro } from '../src/index';
-import { promises as fs } from 'fs';
-import path from 'path';
-
-export const TEST_DIR = path.join(__dirname, 'test_run_data');
-
-// --- Schema Definition ---
-
-const tables = {
-  users: {
-    id: konro.id(),
-    name: konro.string({ min: 2 }),
-    email: konro.string({ unique: true, format: 'email' }),
-    age: konro.number({ min: 18, type: 'integer' }),
-    isActive: konro.boolean({ default: true }),
-  },
-  posts: {
-    id: konro.id(),
-    title: konro.string(),
-    content: konro.string(),
-    authorId: konro.number(),
-    publishedAt: konro.date({ default: () => new Date() }),
-  },
-  profiles: {
-    id: konro.id(),
-    bio: konro.string(),
-    userId: konro.number({ unique: true }),
-  },
-  tags: {
-    id: konro.id(),
-    name: konro.string({ unique: true }),
-  },
-  posts_tags: {
-    id: konro.id(),
-    postId: konro.number(),
-    tagId: konro.number(),
-  },
-};
-
-export const schemaDef = {
-  tables,
-  relations: (_tables: typeof tables) => ({
-    users: {
-      posts: konro.many('posts', { on: 'id', references: 'authorId' }),
-      profile: konro.one('profiles', { on: 'id', references: 'userId' }),
-    },
-    posts: {
-      author: konro.one('users', { on: 'authorId', references: 'id' }),
-      tags: konro.many('posts_tags', { on: 'id', references: 'postId' }),
-    },
-    profiles: {
-      user: konro.one('users', { on: 'userId', references: 'id' }),
-    },
-    posts_tags: {
-        post: konro.one('posts', { on: 'postId', references: 'id' }),
-        tag: konro.one('tags', { on: 'tagId', references: 'id' }),
-    }
-  }),
-};
-
-export const testSchema = konro.createSchema(schemaDef);
-
-// --- Test Utilities ---
-
-export const cleanup = async () => {
-    try {
-        await fs.rm(TEST_DIR, { recursive: true, force: true });
-    } catch (error: any) {
-        if (error.code !== 'ENOENT') {
-            console.error('Error during cleanup:', error);
-        }
-    }
-};
-
-export const ensureTestDir = async () => {
-    await fs.mkdir(TEST_DIR, { recursive: true });
-}
 ````
 
 ## File: README.md
@@ -2255,6 +1595,115 @@ export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter =
 };
 ````
 
+## File: src/schema.ts
+````typescript
+// --- TYPE UTILITIES ---
+type Pretty<T> = { [K in keyof T]: T[K] } & {};
+
+// --- CORE DEFINITIONS ---
+
+export interface ColumnOptions<T> {
+  unique?: boolean;
+  default?: T | (() => T);
+}
+
+export interface StringColumnOptions extends ColumnOptions<string> {
+  min?: number;
+  max?: number;
+  format?: 'email' | 'uuid' | 'url';
+}
+
+export interface NumberColumnOptions extends ColumnOptions<number> {
+  min?: number;
+  max?: number;
+  type?: 'integer';
+}
+
+export interface ColumnDefinition<T> {
+  _type: 'column';
+  dataType: 'id' | 'string' | 'number' | 'boolean' | 'date' | 'object';
+  options?: ColumnOptions<T>;
+  _tsType: T; // For TypeScript inference only
+}
+
+export interface StringColumnDefinition extends ColumnDefinition<string> {
+  dataType: 'string';
+  options?: StringColumnOptions;
+}
+
+export interface NumberColumnDefinition extends ColumnDefinition<number> {
+  dataType: 'number';
+  options?: NumberColumnOptions;
+}
+
+export interface RelationDefinition {
+  _type: 'relation';
+  relationType: 'one' | 'many';
+  targetTable: string;
+  on: string;
+  references: string;
+}
+
+// --- TYPE INFERENCE MAGIC ---
+
+type BaseModels<TTables extends Record<string, Record<string, ColumnDefinition<any>>>> = {
+  [TableName in keyof TTables]: {
+    [ColumnName in keyof TTables[TableName]]: TTables[TableName][ColumnName]['_tsType'];
+  };
+};
+
+type WithRelations<
+  TBaseModels extends Record<string, any>,
+  TRelations extends Record<string, Record<string, RelationDefinition>>
+> = {
+    [TableName in keyof TBaseModels]: TBaseModels[TableName] & (TableName extends keyof TRelations ? {
+      [RelationName in keyof TRelations[TableName]]?: TRelations[TableName][RelationName]['relationType'] extends 'one'
+      ? TBaseModels[TRelations[TableName][RelationName]['targetTable']] | null
+      : TBaseModels[TRelations[TableName][RelationName]['targetTable']][];
+    } : {});
+  };
+
+export interface KonroSchema<
+  TTables extends Record<string, Record<string, ColumnDefinition<any>>>,
+  TRelations extends Record<string, Record<string, RelationDefinition>>
+> {
+  tables: TTables;
+  relations: TRelations;
+  types: Pretty<WithRelations<BaseModels<TTables>, TRelations>>;
+}
+
+// --- SCHEMA HELPERS ---
+
+export const id = (): ColumnDefinition<number> => ({ _type: 'column', dataType: 'id', options: { unique: true }, _tsType: 0 });
+export const string = (options?: StringColumnOptions): StringColumnDefinition => ({ _type: 'column', dataType: 'string', options, _tsType: '' });
+export const number = (options?: NumberColumnOptions): NumberColumnDefinition => ({ _type: 'column', dataType: 'number', options, _tsType: 0 });
+export const boolean = (options?: ColumnOptions<boolean>): ColumnDefinition<boolean> => ({ _type: 'column', dataType: 'boolean', options, _tsType: false });
+export const date = (options?: ColumnOptions<Date>): ColumnDefinition<Date> => ({ _type: 'column', dataType: 'date', options, _tsType: new Date() });
+export const object = <T extends Record<string, any>>(options?: ColumnOptions<T>): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options, _tsType: undefined! });
+
+export const one = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'one', targetTable, ...options });
+export const many = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'many', targetTable, ...options });
+
+// --- SCHEMA BUILDER ---
+
+type SchemaInputDef<T> = {
+  tables: T;
+  relations?: (tables: T) => Record<string, Record<string, RelationDefinition>>;
+};
+
+export function createSchema<const TDef extends SchemaInputDef<any>>(definition: TDef) {
+  const relations = definition.relations ? definition.relations(definition.tables) : {};
+  return {
+    tables: definition.tables,
+    relations,
+    types: null as any, // This is a runtime placeholder for the inferred types
+  } as KonroSchema<
+    TDef['tables'],
+    TDef['relations'] extends (...args: any) => any ? ReturnType<TDef['relations']> : {}
+  >;
+}
+````
+
 ## File: src/db.ts
 ````typescript
 import { ColumnDefinition, KonroSchema, RelationDefinition } from './schema';
@@ -2378,115 +1827,6 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
 };
 ````
 
-## File: src/schema.ts
-````typescript
-// --- TYPE UTILITIES ---
-type Pretty<T> = { [K in keyof T]: T[K] } & {};
-
-// --- CORE DEFINITIONS ---
-
-export interface ColumnOptions<T> {
-  unique?: boolean;
-  default?: T | (() => T);
-}
-
-export interface StringColumnOptions extends ColumnOptions<string> {
-  min?: number;
-  max?: number;
-  format?: 'email' | 'uuid' | 'url';
-}
-
-export interface NumberColumnOptions extends ColumnOptions<number> {
-  min?: number;
-  max?: number;
-  type?: 'integer';
-}
-
-export interface ColumnDefinition<T> {
-  _type: 'column';
-  dataType: 'id' | 'string' | 'number' | 'boolean' | 'date' | 'object';
-  options?: ColumnOptions<T>;
-  _tsType: T; // For TypeScript inference only
-}
-
-export interface StringColumnDefinition extends ColumnDefinition<string> {
-  dataType: 'string';
-  options?: StringColumnOptions;
-}
-
-export interface NumberColumnDefinition extends ColumnDefinition<number> {
-  dataType: 'number';
-  options?: NumberColumnOptions;
-}
-
-export interface RelationDefinition {
-  _type: 'relation';
-  relationType: 'one' | 'many';
-  targetTable: string;
-  on: string;
-  references: string;
-}
-
-// --- TYPE INFERENCE MAGIC ---
-
-type BaseModels<TTables extends Record<string, Record<string, ColumnDefinition<any>>>> = {
-  [TableName in keyof TTables]: {
-    [ColumnName in keyof TTables[TableName]]: TTables[TableName][ColumnName]['_tsType'];
-  };
-};
-
-type WithRelations<
-  TBaseModels extends Record<string, any>,
-  TRelations extends Record<string, Record<string, RelationDefinition>>
-> = {
-    [TableName in keyof TBaseModels]: TBaseModels[TableName] & (TableName extends keyof TRelations ? {
-      [RelationName in keyof TRelations[TableName]]?: TRelations[TableName][RelationName]['relationType'] extends 'one'
-      ? TBaseModels[TRelations[TableName][RelationName]['targetTable']] | null
-      : TBaseModels[TRelations[TableName][RelationName]['targetTable']][];
-    } : {});
-  };
-
-export interface KonroSchema<
-  TTables extends Record<string, Record<string, ColumnDefinition<any>>>,
-  TRelations extends Record<string, Record<string, RelationDefinition>>
-> {
-  tables: TTables;
-  relations: TRelations;
-  types: Pretty<WithRelations<BaseModels<TTables>, TRelations>>;
-}
-
-// --- SCHEMA HELPERS ---
-
-export const id = (): ColumnDefinition<number> => ({ _type: 'column', dataType: 'id', options: { unique: true }, _tsType: 0 });
-export const string = (options?: StringColumnOptions): StringColumnDefinition => ({ _type: 'column', dataType: 'string', options, _tsType: '' });
-export const number = (options?: NumberColumnOptions): NumberColumnDefinition => ({ _type: 'column', dataType: 'number', options, _tsType: 0 });
-export const boolean = (options?: ColumnOptions<boolean>): ColumnDefinition<boolean> => ({ _type: 'column', dataType: 'boolean', options, _tsType: false });
-export const date = (options?: ColumnOptions<Date>): ColumnDefinition<Date> => ({ _type: 'column', dataType: 'date', options, _tsType: new Date() });
-export const object = <T extends Record<string, any>>(options?: ColumnOptions<T>): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options, _tsType: undefined! });
-
-export const one = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'one', targetTable, ...options });
-export const many = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'many', targetTable, ...options });
-
-// --- SCHEMA BUILDER ---
-
-type SchemaInputDef<T> = {
-  tables: T;
-  relations?: (tables: T) => Record<string, Record<string, RelationDefinition>>;
-};
-
-export function createSchema<const TDef extends SchemaInputDef<any>>(definition: TDef) {
-  const relations = definition.relations ? definition.relations(definition.tables) : {};
-  return {
-    tables: definition.tables,
-    relations,
-    types: null as any, // This is a runtime placeholder for the inferred types
-  } as KonroSchema<
-    TDef['tables'],
-    TDef['relations'] extends (...args: any) => any ? ReturnType<TDef['relations']> : {}
-  >;
-}
-````
-
 ## File: src/operations.ts
 ````typescript
 import { DatabaseState, KRecord } from './types';
@@ -2547,6 +1887,7 @@ export const _queryImpl = <S extends KonroSchema<any, any>>(state: DatabaseState
             const newRec: KRecord = {};
             for (const outputKey in nestedSelect) {
               const def = nestedSelect[outputKey];
+              if (!def) continue;
               // nested with() does not support selecting relations, only columns, as per spec.
               if (def._type === 'column') {
                   const colName = Object.keys(targetTableSchema).find(key => targetTableSchema[key] === def);
@@ -2582,6 +1923,7 @@ export const _queryImpl = <S extends KonroSchema<any, any>>(state: DatabaseState
       const newRec: KRecord = {};
       for (const outputKey in descriptor.select!) {
         const def = descriptor.select![outputKey];
+        if (!def) continue;
         if (def._type === 'column') {
             const colName = Object.keys(tableSchema).find(key => tableSchema[key] === def);
             if (colName && rec.hasOwnProperty(colName)) {

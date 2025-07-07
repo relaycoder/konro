@@ -2,15 +2,15 @@ import { KonroSchema } from './schema';
 import { StorageAdapter } from './adapter';
 import { DatabaseState, KRecord } from './types';
 import { _queryImpl, _insertImpl, _updateImpl, _deleteImpl, createEmptyState as createEmptyStateImpl, QueryDescriptor } from './operations';
-
-// A helper to create a predicate function from a partial object
-const createPredicate = <T extends KRecord>(partial: Partial<T>) =>
-  (record: T): boolean =>
-    Object.entries(partial).every(([key, value]) => (record as KRecord)[key] === value);
+import { createPredicateFromPartial } from './utils/predicate.util';
 
 // A helper to normalize a predicate argument
-const normalizePredicate = <T extends KRecord>(predicate: Partial<T> | ((record: T) => boolean)): ((record: KRecord) => boolean) =>
-  typeof predicate === 'function' ? predicate as ((record: KRecord) => boolean) : createPredicate(predicate as Partial<KRecord>);
+const normalizePredicate = <T extends KRecord>(
+  predicate: Partial<T> | ((record: T) => boolean)
+): ((record: KRecord) => boolean) =>
+  // The cast is necessary due to function argument contravariance.
+  // The internal operations work on the wider `KRecord`, while the fluent API provides the specific `T`.
+  (typeof predicate === 'function' ? predicate : createPredicateFromPartial(predicate)) as (record: KRecord) => boolean;
 
 // --- TYPE-SAFE FLUENT API BUILDERS ---
 

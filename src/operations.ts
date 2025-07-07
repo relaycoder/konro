@@ -1,5 +1,6 @@
 import { DatabaseState, KRecord } from './types';
 import { KonroSchema, RelationDefinition } from './schema';
+import { KonroError } from './utils/error.util';
 
 // --- HELPERS ---
 
@@ -84,7 +85,7 @@ const findRelatedRecords = (state: DatabaseState, record: KRecord, relationDef: 
 export const _insertImpl = (state: DatabaseState, schema: KonroSchema<any, any>, tableName: string, values: KRecord[]): [DatabaseState, KRecord[]] => {
   const newState = structuredClone(state);
   const tableState = newState[tableName];
-  if (!tableState) throw new Error(`Table "${tableName}" does not exist in the database state.`);
+  if (!tableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
   const tableSchema = schema.tables[tableName];
   const insertedRecords: KRecord[] = [];
 
@@ -113,7 +114,7 @@ export const _insertImpl = (state: DatabaseState, schema: KonroSchema<any, any>,
 export const _updateImpl = (state: DatabaseState, tableName: string, data: Partial<KRecord>, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
   const newState = structuredClone(state);
   const tableState = newState[tableName];
-  if (!tableState) throw new Error(`Table "${tableName}" does not exist in the database state.`);
+  if (!tableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
   const updatedRecords: KRecord[] = [];
 
   tableState.records = tableState.records.map(record => {
@@ -134,7 +135,7 @@ export const _updateImpl = (state: DatabaseState, tableName: string, data: Parti
 export const _deleteImpl = (state: DatabaseState, tableName: string, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
   const newState = structuredClone(state);
   const tableState = newState[tableName];
-  if (!tableState) throw new Error(`Table "${tableName}" does not exist in the database state.`);
+  if (!tableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
   const deletedRecords: KRecord[] = [];
 
   const keptRecords = tableState.records.filter(record => {

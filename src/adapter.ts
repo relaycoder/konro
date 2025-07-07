@@ -3,13 +3,9 @@ import path from 'path';
 import { DatabaseState } from './types';
 import { createEmptyState } from './operations';
 import { KonroSchema } from './schema';
-
-let yaml: { parse: (str: string) => any; stringify: (obj: any, options?: any) => string; } | undefined;
-try {
-  yaml = require('js-yaml');
-} catch {
-  // js-yaml is an optional peer dependency
-}
+import { getSerializer } from './utils/serializer.util';
+import { readFile, writeAtomic } from './utils/fs.util';
+import { TEMP_FILE_SUFFIX } from './utils/constants';
 
 export interface StorageAdapter {
   read(schema: KonroSchema<any, any>): Promise<DatabaseState>;
@@ -23,41 +19,6 @@ export type FileAdapterOptions = {
   format: 'json' | 'yaml';
 } & (SingleFileStrategy | MultiFileStrategy);
 
-const getSerializer = (format: 'json' | 'yaml') => {
-  if (format === 'json') {
-    return {
-      parse: (data: string) => JSON.parse(data),
-      stringify: (obj: any) => JSON.stringify(obj, null, 2),
-    };
-  }
-  if (!yaml) {
-    throw new Error("The 'yaml' format requires 'js-yaml' to be installed. Please run 'npm install js-yaml'.");
-  }
-  return {
-    parse: (data: string) => yaml.parse(data),
-    stringify: (obj: any) => yaml.stringify(obj),
-  };
-};
-
-const readFile = async (filepath: string): Promise<string | null> => {
-  try {
-    return await fs.readFile(filepath, 'utf-8');
-  } catch (error: any) {
-    if (error.code === 'ENOENT') {
-      return null;
-    }
-    throw error;
-  }
-};
-
-const writeAtomic = async (filepath: string, content: string): Promise<void> => {
-    const tempFilepath = `${filepath}.${Date.now()}.tmp`;
-    await fs.mkdir(path.dirname(filepath), { recursive: true });
-    await fs.writeFile(tempFilepath, content, 'utf-8');
-    await fs.rename(tempFilepath, filepath);
-};
-
-
 export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter => {
   const serializer = getSerializer(options.format);
   const fileExtension = `.${options.format}`;
@@ -65,7 +26,7 @@ export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter =
   const readSingle = async (schema: KonroSchema<any, any>): Promise<DatabaseState> => {
     const filepath = options.single!.filepath;
     const data = await readFile(filepath);
-    return data ? serializer.parse(data) : createEmptyState(schema);
+    return data ? serializer.parse<DatabaseState>(data) : createEmptyState(schema);
   };
 
   const writeSingle = async (state: DatabaseState): Promise<void> => {
@@ -95,7 +56,7 @@ export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter =
     // As per spec, write all to temp files first
     const tempWrites = Object.entries(state).map(async ([tableName, tableState]) => {
       const filepath = path.join(dir, `${tableName}${fileExtension}`);
-      const tempFilepath = `${filepath}.${Date.now()}.tmp`;
+      const tempFilepath = `${filepath}.${Date.now()}${TEMP_FILE_SUFFIX}`;
       const content = serializer.stringify(tableState);
       await fs.writeFile(tempFilepath, content, 'utf-8');
       return { tempFilepath, filepath };

@@ -3,13 +3,6 @@ import { KonroSchema, RelationDefinition } from './schema';
 
 // --- HELPERS ---
 
-/** Normalizes a predicate object or function into a function. */
-const normalizePredicate = <T extends KRecord>(predicate: Partial<T> | ((record: T) => boolean)): ((record: T) => boolean) => {
-  if (typeof predicate === 'function') {
-    return predicate;
-  }
-  return (record: T) => Object.entries(predicate).every(([key, value]) => record[key] === value);
-};
 
 /** Creates a pristine, empty database state from a schema. */
 export const createEmptyState = (schema: KonroSchema<any, any>): DatabaseState => {
@@ -89,6 +82,7 @@ const findRelatedRecords = (state: DatabaseState, record: KRecord, relationDef: 
 export const _insertImpl = (state: DatabaseState, schema: KonroSchema<any, any>, tableName: string, values: KRecord[]): [DatabaseState, KRecord[]] => {
   const newState = structuredClone(state);
   const tableState = newState[tableName];
+  if (!tableState) throw new Error(`Table "${tableName}" does not exist in the database state.`);
   const tableSchema = schema.tables[tableName];
   const insertedRecords: KRecord[] = [];
 
@@ -117,6 +111,7 @@ export const _insertImpl = (state: DatabaseState, schema: KonroSchema<any, any>,
 export const _updateImpl = (state: DatabaseState, tableName: string, data: Partial<KRecord>, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
   const newState = structuredClone(state);
   const tableState = newState[tableName];
+  if (!tableState) throw new Error(`Table "${tableName}" does not exist in the database state.`);
   const updatedRecords: KRecord[] = [];
 
   tableState.records = tableState.records.map(record => {
@@ -137,6 +132,7 @@ export const _updateImpl = (state: DatabaseState, tableName: string, data: Parti
 export const _deleteImpl = (state: DatabaseState, tableName: string, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
   const newState = structuredClone(state);
   const tableState = newState[tableName];
+  if (!tableState) throw new Error(`Table "${tableName}" does not exist in the database state.`);
   const deletedRecords: KRecord[] = [];
 
   const keptRecords = tableState.records.filter(record => {

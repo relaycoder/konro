@@ -36,11 +36,11 @@ type WithRelations<
   TBaseModels extends Record<string, any>,
   TRelations extends Record<string, Record<string, RelationDefinition>>
 > = {
-    [TableName in keyof TBaseModels]: TBaseModels[TableName] & {
+    [TableName in keyof TBaseModels]: TBaseModels[TableName] & (TableName extends keyof TRelations ? {
       [RelationName in keyof TRelations[TableName]]?: TRelations[TableName][RelationName]['relationType'] extends 'one'
       ? TBaseModels[TRelations[TableName][RelationName]['targetTable']] | null
       : TBaseModels[TRelations[TableName][RelationName]['targetTable']][];
-    };
+    } : {});
   };
 
 export interface KonroSchema<
@@ -59,7 +59,7 @@ export const string = (options?: ColumnOptions<string>): ColumnDefinition<string
 export const number = (options?: ColumnOptions<number>): ColumnDefinition<number> => ({ _type: 'column', dataType: 'number', options, _tsType: 0 });
 export const boolean = (options?: ColumnOptions<boolean>): ColumnDefinition<boolean> => ({ _type: 'column', dataType: 'boolean', options, _tsType: false });
 export const date = (options?: ColumnOptions<Date>): ColumnDefinition<Date> => ({ _type: 'column', dataType: 'date', options, _tsType: new Date() });
-export const object = <T extends KRecord>(options?: ColumnOptions<T>): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options, _tsType: {} as T });
+export const object = <T extends Record<string, any>>(options?: ColumnOptions<T>): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options, _tsType: {} as T });
 
 export const one = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'one', targetTable, ...options });
 export const many = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'many', targetTable, ...options });

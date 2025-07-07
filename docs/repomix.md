@@ -3,6 +3,15 @@
 docs/
   api-technical-specification.md
   README.md
+src/
+  adapter.ts
+  db.ts
+  index.ts
+  operations.ts
+  schema.ts
+  types.ts
+package.json
+tsconfig.json
 ```
 
 # Files
@@ -1083,4 +1092,501 @@ Konro is a community-driven project. Contributions are warmly welcome. Whether i
 ## 13. License
 
 [MIT](./LICENSE) © [Your Name]
+````
+
+## File: src/adapter.ts
+````typescript
+import { promises as fs } from 'fs';
+import path from 'path';
+import { DatabaseState } from './types';
+import { createEmptyState } from './operations';
+import { KonroSchema } from './schema';
+
+let yaml: { parse: (str: string) => any; stringify: (obj: any) => string; } | undefined;
+try {
+  yaml = require('js-yaml');
+} catch {
+  // js-yaml is an optional peer dependency
+}
+
+export interface StorageAdapter {
+  read(schema: KonroSchema<any, any>): Promise<DatabaseState>;
+  write(state: DatabaseState): Promise<void>;
+}
+
+export type FileAdapterOptions = {
+  format: 'json' | 'yaml';
+  single: { filepath: string };
+  // multi: { dir: string }; // Not implemented for brevity
+};
+
+export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter => {
+  if (options.format === 'yaml' && !yaml) {
+    throw new Error("The 'yaml' format requires 'js-yaml' to be installed. Please run 'npm install js-yaml'.");
+  }
+
+  const read = async (schema: KonroSchema<any, any>): Promise<DatabaseState> => {
+    const filepath = options.single.filepath;
+    try {
+      const data = await fs.readFile(filepath, 'utf-8');
+      return options.format === 'json' ? JSON.parse(data) : yaml!.parse(data);
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        return createEmptyState(schema);
+      }
+      throw error;
+    }
+  };
+
+  const write = async (state: DatabaseState): Promise<void> => {
+    const filepath = options.single.filepath;
+    const tempFilepath = `${filepath}.${Date.now()}.tmp`;
+
+    await fs.mkdir(path.dirname(filepath), { recursive: true });
+
+    const content = options.format === 'json'
+      ? JSON.stringify(state, null, 2)
+      : yaml!.stringify(state);
+
+    await fs.writeFile(tempFilepath, content, 'utf-8');
+    await fs.rename(tempFilepath, filepath);
+  };
+  
+  return { read, write };
+};
+````
+
+## File: src/db.ts
+````typescript
+import { KonroSchema } from './schema';
+import { StorageAdapter } from './adapter';
+import { DatabaseState, KRecord } from './types';
+import { _queryImpl, _insertImpl, _updateImpl, _deleteImpl, createEmptyState as createEmptyStateImpl } from './operations';
+
+interface DbContext<S extends KonroSchema<any, any>> {
+  schema: S;
+  adapter: StorageAdapter;
+  read: () => Promise<DatabaseState>;
+  write: (state: DatabaseState) => Promise<void>;
+  createEmptyState: () => DatabaseState;
+
+  query: (state: DatabaseState) => QueryBuilder;
+  insert: <T extends keyof S['types']>(state: DatabaseState, tableName: T, values: S['types'][T] | S['types'][T][]) => [DatabaseState, S['types'][T] | S['types'][T][]];
+  update: (state: DatabaseState, tableName: keyof S['types']) => UpdateBuilder;
+  delete: (state: DatabaseState, tableName: keyof S['types']) => DeleteBuilder;
+}
+
+// Fluent API Builders
+interface QueryBuilder {
+  from: (tableName: string) => this;
+  where: (predicate: any) => this;
+  with: (relations: any) => this;
+  limit: (count: number) => this;
+  offset: (count: number) => this;
+  all: <T = KRecord>() => Promise<T[]>;
+  first: <T = KRecord>() => Promise<T | null>;
+}
+
+interface UpdateBuilder {
+  set: (data: any) => { where: (predicate: any) => [DatabaseState, KRecord[]]; };
+}
+
+interface DeleteBuilder {
+  where: (predicate: any) => [DatabaseState, KRecord[]];
+}
+
+
+export const createDatabase = <S extends KonroSchema<any, any>>(options: { schema: S, adapter: StorageAdapter }): DbContext<S> => {
+  const { schema, adapter } = options;
+
+  const normalize = (p: any) => typeof p === 'function' ? p : (r: KRecord) => Object.entries(p).every(([k, v]) => r[k] === v);
+
+  return {
+    schema,
+    adapter,
+    read: () => adapter.read(schema),
+    write: (state) => adapter.write(state),
+    createEmptyState: () => createEmptyStateImpl(schema),
+
+    insert: (state, tableName, values) => {
+      const valsArray = Array.isArray(values) ? values : [values];
+      const [newState, inserted] = _insertImpl(state, schema, tableName as string, valsArray);
+      return [newState, Array.isArray(values) ? inserted : inserted[0]] as any;
+    },
+
+    query: (state) => {
+      const descriptor: any = {};
+      const builder: QueryBuilder = {
+        from: (tableName) => { descriptor.tableName = tableName; return builder; },
+        where: (predicate) => { descriptor.where = normalize(predicate); return builder; },
+        with: (relations) => { descriptor.with = relations; return builder; },
+        limit: (count) => { descriptor.limit = count; return builder; },
+        offset: (count) => { descriptor.offset = count; return builder; },
+        all: () => Promise.resolve(_queryImpl(state, schema, descriptor)) as any,
+        first: () => Promise.resolve(_queryImpl(state, schema, { ...descriptor, limit: 1 })[0] ?? null) as any,
+      };
+      return builder;
+    },
+
+    update: (state, tableName) => ({
+      set: (data) => ({
+        where: (predicate) => _updateImpl(state, tableName as string, data, normalize(predicate)),
+      }),
+    }),
+
+    delete: (state, tableName) => ({
+      where: (predicate) => _deleteImpl(state, tableName as string, normalize(predicate)),
+    }),
+  };
+};
+````
+
+## File: src/index.ts
+````typescript
+import { createDatabase } from './db';
+import { createFileAdapter } from './adapter';
+import { createSchema, id, string, number, boolean, date, object, one, many } from './schema';
+
+/**
+ * The main Konro object, providing access to all core functionalities
+ * for schema definition, database creation, and adapter configuration.
+ */
+export const konro = {
+  /**
+   * Defines the structure, types, and relations of your database.
+   * This is the single source of truth for both runtime validation and static types.
+   */
+  createSchema,
+  /**
+   * Creates the main `db` context, which is the primary interface for all
+   * database operations (read, write, query, etc.).
+   */
+  createDatabase,
+  /**
+   * Creates a file-based storage adapter for persisting the database state
+   * to a JSON or YAML file.
+   */
+  createFileAdapter,
+  // --- Column Definition Helpers ---
+  id,
+  string,
+  number,
+  boolean,
+  date,
+  object,
+  // --- Relationship Definition Helpers ---
+  one,
+  many,
+};
+````
+
+## File: src/operations.ts
+````typescript
+import { DatabaseState, KRecord } from './types';
+import { KonroSchema, RelationDefinition } from './schema';
+
+// --- HELPERS ---
+
+
+/** Creates a pristine, empty database state from a schema. */
+export const createEmptyState = (schema: KonroSchema<any, any>): DatabaseState => {
+  const state: DatabaseState = {};
+  for (const tableName in schema.tables) {
+    state[tableName] = { records: [], meta: { lastId: 0 } };
+  }
+  return state;
+};
+
+// --- QUERY ---
+
+interface QueryDescriptor {
+  tableName: string;
+  where?: (record: KRecord) => boolean;
+  with?: Record<string, boolean | { where?: (rec: KRecord) => boolean }>;
+  limit?: number;
+  offset?: number;
+}
+
+export const _queryImpl = (state: DatabaseState, schema: KonroSchema<any, any>, descriptor: QueryDescriptor): KRecord[] => {
+  const tableState = state[descriptor.tableName];
+  if (!tableState) return [];
+
+  // 1. Filter
+  let results = descriptor.where ? tableState.records.filter(descriptor.where) : [...tableState.records];
+
+  // 2. Eager load relations (`with`)
+  if (descriptor.with) {
+    results = structuredClone(results); // Clone to avoid mutating state
+    for (const record of results) {
+      for (const relationName in descriptor.with) {
+        const relationDef = schema.relations[descriptor.tableName]?.[relationName];
+        if (!relationDef) continue;
+
+        const relatedRecords = findRelatedRecords(state, record, relationDef);
+
+        const withOpts = descriptor.with[relationName];
+        const nestedWhere = typeof withOpts === 'object' ? withOpts.where : undefined;
+
+        record[relationName] = nestedWhere ? relatedRecords.filter(nestedWhere) : relatedRecords;
+        if (relationDef.relationType === 'one') {
+          record[relationName] = record[relationName][0] ?? null;
+        }
+      }
+    }
+  }
+
+  // 3. Paginate
+  const offset = descriptor.offset ?? 0;
+  const limit = descriptor.limit ?? results.length;
+  return results.slice(offset, offset + limit);
+};
+
+const findRelatedRecords = (state: DatabaseState, record: KRecord, relationDef: RelationDefinition) => {
+  const foreignKey = record[relationDef.on];
+  const targetTable = state[relationDef.targetTable];
+
+  if (foreignKey === undefined || !targetTable) return [];
+
+  // one-to-many: 'on' is PK on current table, 'references' is FK on target
+  if (relationDef.relationType === 'many') {
+    return targetTable.records.filter(r => r[relationDef.references] === foreignKey);
+  }
+
+  // many-to-one: 'on' is FK on current table, 'references' is PK on target
+  if (relationDef.relationType === 'one') {
+    return targetTable.records.filter(r => r[relationDef.references] === foreignKey);
+  }
+
+  return [];
+};
+
+
+// --- INSERT ---
+
+export const _insertImpl = (state: DatabaseState, schema: KonroSchema<any, any>, tableName: string, values: KRecord[]): [DatabaseState, KRecord[]] => {
+  const newState = structuredClone(state);
+  const tableState = newState[tableName];
+  if (!tableState) throw new Error(`Table "${tableName}" does not exist in the database state.`);
+  const tableSchema = schema.tables[tableName];
+  const insertedRecords: KRecord[] = [];
+
+  for (const value of values) {
+    const newRecord: KRecord = { ...value };
+    // Handle IDs and defaults
+    for (const colName in tableSchema) {
+      const colDef = tableSchema[colName];
+      if (colDef.dataType === 'id') {
+        tableState.meta.lastId++;
+        newRecord[colName] = tableState.meta.lastId;
+      }
+      if (newRecord[colName] === undefined && colDef.options?.default !== undefined) {
+        newRecord[colName] = typeof colDef.options.default === 'function' ? colDef.options.default() : colDef.options.default;
+      }
+    }
+    tableState.records.push(newRecord);
+    insertedRecords.push(newRecord);
+  }
+
+  return [newState, insertedRecords];
+};
+
+// --- UPDATE ---
+
+export const _updateImpl = (state: DatabaseState, tableName: string, data: Partial<KRecord>, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
+  const newState = structuredClone(state);
+  const tableState = newState[tableName];
+  if (!tableState) throw new Error(`Table "${tableName}" does not exist in the database state.`);
+  const updatedRecords: KRecord[] = [];
+
+  tableState.records = tableState.records.map(record => {
+    if (predicate(record)) {
+      const updatedRecord = { ...record, ...data };
+      updatedRecords.push(updatedRecord);
+      return updatedRecord;
+    }
+    return record;
+  });
+
+  return [newState, updatedRecords];
+};
+
+
+// --- DELETE ---
+
+export const _deleteImpl = (state: DatabaseState, tableName: string, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
+  const newState = structuredClone(state);
+  const tableState = newState[tableName];
+  if (!tableState) throw new Error(`Table "${tableName}" does not exist in the database state.`);
+  const deletedRecords: KRecord[] = [];
+
+  const keptRecords = tableState.records.filter(record => {
+    if (predicate(record)) {
+      deletedRecords.push(record);
+      return false;
+    }
+    return true;
+  });
+
+  tableState.records = keptRecords;
+  return [newState, deletedRecords];
+};
+````
+
+## File: src/schema.ts
+````typescript
+// --- TYPE UTILITIES ---
+type Pretty<T> = { [K in keyof T]: T[K] } & {};
+
+// --- CORE DEFINITIONS ---
+
+export interface ColumnOptions<T> {
+  unique?: boolean;
+  default?: T | (() => T);
+  [key: string]: any; // For rules like min, max, format etc.
+}
+
+export interface ColumnDefinition<T> {
+  _type: 'column';
+  dataType: 'id' | 'string' | 'number' | 'boolean' | 'date' | 'object';
+  options?: ColumnOptions<T>;
+  _tsType: T; // For TypeScript inference only
+}
+
+export interface RelationDefinition {
+  _type: 'relation';
+  relationType: 'one' | 'many';
+  targetTable: string;
+  on: string;
+  references: string;
+}
+
+// --- TYPE INFERENCE MAGIC ---
+
+type BaseModels<TTables extends Record<string, Record<string, ColumnDefinition<any>>>> = {
+  [TableName in keyof TTables]: {
+    [ColumnName in keyof TTables[TableName]]: TTables[TableName][ColumnName]['_tsType'];
+  };
+};
+
+type WithRelations<
+  TBaseModels extends Record<string, any>,
+  TRelations extends Record<string, Record<string, RelationDefinition>>
+> = {
+    [TableName in keyof TBaseModels]: TBaseModels[TableName] & (TableName extends keyof TRelations ? {
+      [RelationName in keyof TRelations[TableName]]?: TRelations[TableName][RelationName]['relationType'] extends 'one'
+      ? TBaseModels[TRelations[TableName][RelationName]['targetTable']] | null
+      : TBaseModels[TRelations[TableName][RelationName]['targetTable']][];
+    } : {});
+  };
+
+export interface KonroSchema<
+  TTables extends Record<string, Record<string, ColumnDefinition<any>>>,
+  TRelations extends Record<string, Record<string, RelationDefinition>>
+> {
+  tables: TTables;
+  relations: TRelations;
+  types: Pretty<WithRelations<BaseModels<TTables>, TRelations>>;
+}
+
+// --- SCHEMA HELPERS ---
+
+export const id = (): ColumnDefinition<number> => ({ _type: 'column', dataType: 'id', options: { unique: true }, _tsType: 0 });
+export const string = (options?: ColumnOptions<string>): ColumnDefinition<string> => ({ _type: 'column', dataType: 'string', options, _tsType: '' });
+export const number = (options?: ColumnOptions<number>): ColumnDefinition<number> => ({ _type: 'column', dataType: 'number', options, _tsType: 0 });
+export const boolean = (options?: ColumnOptions<boolean>): ColumnDefinition<boolean> => ({ _type: 'column', dataType: 'boolean', options, _tsType: false });
+export const date = (options?: ColumnOptions<Date>): ColumnDefinition<Date> => ({ _type: 'column', dataType: 'date', options, _tsType: new Date() });
+export const object = <T extends Record<string, any>>(options?: ColumnOptions<T>): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options, _tsType: {} as T });
+
+export const one = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'one', targetTable, ...options });
+export const many = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'many', targetTable, ...options });
+
+// --- SCHEMA BUILDER ---
+
+type SchemaInputDef<T> = {
+  tables: T;
+  relations?: (tables: T) => Record<string, Record<string, RelationDefinition>>;
+};
+
+export function createSchema<const TDef extends SchemaInputDef<Record<string, Record<string, ColumnDefinition<any>>>>>(definition: TDef) {
+  const relations = definition.relations ? definition.relations(definition.tables) : {};
+  return {
+    tables: definition.tables,
+    relations,
+    types: null as any, // This is a runtime placeholder for the inferred types
+  } as KonroSchema<
+    TDef['tables'],
+    TDef['relations'] extends (...args: any) => any ? ReturnType<TDef['relations']> : {}
+  >;
+}
+````
+
+## File: src/types.ts
+````typescript
+/**
+ * The in-memory representation of the entire database. It is a plain, immutable object.
+ */
+export type DatabaseState = {
+  [tableName: string]: {
+    records: KRecord[];
+    meta: {
+      lastId: number;
+    };
+  };
+};
+
+/**
+ * A generic representation of a single record within a table.
+ */
+export type KRecord = Record<string, any>;
+````
+
+## File: package.json
+````json
+{
+  "name": "konro",
+  "module": "src/index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
+````
+
+## File: tsconfig.json
+````json
+{
+  "compilerOptions": {
+    // Environment setup & latest features
+    "lib": ["ESNext"],
+    "target": "ESNext",
+    "module": "Preserve",
+    "moduleDetection": "force",
+    "jsx": "react-jsx",
+    "allowJs": true,
+
+    // Bundler mode
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": false,
+    "noEmit": true,
+
+    // Best practices
+    "strict": true,
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+
+
+    // Some stricter flags (disabled by default)
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noPropertyAccessFromIndexSignature": true
+  },
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["dist/**/*"]
+}
 ````

@@ -22,41 +22,37 @@ export type FileAdapterOptions = {
   // multi: { dir: string }; // Not implemented for brevity
 };
 
-class FileAdapter implements StorageAdapter {
-  constructor(private options: FileAdapterOptions) {
-    if (options.format === 'yaml' && !yaml) {
-      throw new Error("The 'yaml' format requires 'js-yaml' to be installed. Please run 'npm install js-yaml'.");
-    }
+export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter => {
+  if (options.format === 'yaml' && !yaml) {
+    throw new Error("The 'yaml' format requires 'js-yaml' to be installed. Please run 'npm install js-yaml'.");
   }
 
-  async read(schema: KonroSchema<any, any>): Promise<DatabaseState> {
-    const filepath = this.options.single.filepath;
+  const read = async (schema: KonroSchema<any, any>): Promise<DatabaseState> => {
+    const filepath = options.single.filepath;
     try {
       const data = await fs.readFile(filepath, 'utf-8');
-      return this.options.format === 'json' ? JSON.parse(data) : yaml!.parse(data);
+      return options.format === 'json' ? JSON.parse(data) : yaml!.parse(data);
     } catch (error: any) {
       if (error.code === 'ENOENT') {
         return createEmptyState(schema);
       }
       throw error;
     }
-  }
+  };
 
-  async write(state: DatabaseState): Promise<void> {
-    const filepath = this.options.single.filepath;
+  const write = async (state: DatabaseState): Promise<void> => {
+    const filepath = options.single.filepath;
     const tempFilepath = `${filepath}.${Date.now()}.tmp`;
 
     await fs.mkdir(path.dirname(filepath), { recursive: true });
 
-    const content = this.options.format === 'json'
+    const content = options.format === 'json'
       ? JSON.stringify(state, null, 2)
       : yaml!.stringify(state);
 
     await fs.writeFile(tempFilepath, content, 'utf-8');
     await fs.rename(tempFilepath, filepath);
-  }
-}
-
-export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter => {
-  return new FileAdapter(options);
+  };
+  
+  return { read, write };
 };

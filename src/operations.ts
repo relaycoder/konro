@@ -1,6 +1,6 @@
 import { DatabaseState, KRecord } from './types';
 import { KonroSchema, RelationDefinition } from './schema';
-import { KonroError } from './utils/error.util';
+import { KonroError, KonroValidationError } from './utils/error.util';
 
 // --- HELPERS ---
 
@@ -120,6 +120,10 @@ export const _insertImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
         newRecord[colName] = typeof colDef.options.default === 'function' ? colDef.options.default() : colDef.options.default;
       }
     }
+
+    // Validate the record before inserting
+    validateRecord(newRecord, tableSchema, tableState.records);
+
     tableState.records.push(newRecord);
     insertedRecords.push(newRecord);
   }
@@ -133,17 +137,19 @@ export const _updateImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
   const newState = structuredClone(state);
   const tableState = newState[tableName];
   if (!tableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
-  
+
   const tableSchema = schema.tables[tableName];
   if (!tableSchema) {
     throw KonroError(`Schema for table "${tableName}" not found.`);
   }
-  
+
   const updatedRecords: KRecord[] = [];
 
   const updateData = { ...data };
   // Find the ID column from the schema and prevent it from being updated.
-  const idColumn = Object.entries(tableSchema).find(([, colDef]) => colDef.dataType === 'id')?.[0];
+  const idColumn = Object.entries(tableSchema).find(([, colDef]) => {
+    return colDef && typeof colDef === 'object' && '_type' in colDef && colDef._type === 'column' && 'dataType' in colDef && colDef.dataType === 'id';
+  })?.[0];
   if (idColumn && updateData[idColumn] !== undefined) {
     delete updateData[idColumn];
   }
@@ -151,6 +157,11 @@ export const _updateImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
   tableState.records = tableState.records.map(record => {
     if (predicate(record)) {
       const updatedRecord = { ...record, ...updateData };
+
+      // Validate the updated record, excluding current record from unique checks
+      const otherRecords = tableState.records.filter(r => r !== record);
+      validateRecord(updatedRecord, tableSchema, otherRecords);
+
       updatedRecords.push(updatedRecord);
       return updatedRecord;
     }
@@ -179,4 +190,59 @@ export const _deleteImpl = (state: DatabaseState, tableName: string, predicate: 
 
   tableState.records = keptRecords;
   return [newState, deletedRecords];
+};
+
+// --- VALIDATION ---
+
+const validateRecord = (record: KRecord, tableSchema: Record<string, any>, existingRecords: KRecord[]): void => {
+  for (const [columnName, colDef] of Object.entries(tableSchema)) {
+    if (!colDef || typeof colDef !== 'object' || !('dataType' in colDef)) continue;
+
+    const value = record[columnName];
+    const options = colDef.options || {};
+
+    // Skip validation for undefined values (they should have defaults applied already)
+    if (value === undefined) continue;
+
+    // Validate unique constraint
+    if (options.unique && existingRecords.some(r => r[columnName] === value)) {
+      throw KonroValidationError(`Value '${value}' for column '${columnName}' must be unique`);
+    }
+
+    // Validate string constraints
+    if (colDef.dataType === 'string' && typeof value === 'string') {
+      // Min length
+      if (options.min !== undefined && value.length < options.min) {
+        throw KonroValidationError(`String '${value}' for column '${columnName}' is too short (min: ${options.min})`);
+      }
+
+      // Max length
+      if (options.max !== undefined && value.length > options.max) {
+        throw KonroValidationError(`String '${value}' for column '${columnName}' is too long (max: ${options.max})`);
+      }
+
+      // Format validation
+      if (options.format === 'email' && !isValidEmail(value)) {
+        throw KonroValidationError(`Value '${value}' for column '${columnName}' is not a valid email`);
+      }
+    }
+
+    // Validate number constraints
+    if (colDef.dataType === 'number' && typeof value === 'number') {
+      // Min value
+      if (options.min !== undefined && value < options.min) {
+        throw KonroValidationError(`Number ${value} for column '${columnName}' is too small (min: ${options.min})`);
+      }
+
+      // Max value
+      if (options.max !== undefined && value > options.max) {
+        throw KonroValidationError(`Number ${value} for column '${columnName}' is too large (max: ${options.max})`);
+      }
+    }
+  }
+};
+
+const isValidEmail = (email: string): boolean => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email);
 };

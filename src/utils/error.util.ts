@@ -1,11 +1,16 @@
-// Per user request: no classes. Using factory functions for errors.
-const createKonroError = (name: string) => (message: string): Error => {
-  const error = new Error(message);
-  error.name = name;
-  return error;
+// Per user request: no classes. Using constructor functions for errors.
+const createKonroError = (name: string) => {
+  function KonroErrorConstructor(message: string) {
+    const error = new Error(message);
+    error.name = name;
+    Object.setPrototypeOf(error, KonroErrorConstructor.prototype);
+    return error;
+  }
+  Object.setPrototypeOf(KonroErrorConstructor.prototype, Error.prototype);
+  return KonroErrorConstructor;
 };
 
-/** Base class for all Konro-specific errors. */
+/** Base constructor for all Konro-specific errors. */
 export const KonroError = createKonroError('KonroError');
 
 /** Thrown for storage adapter-related issues. */

@@ -15,6 +15,7 @@ const normalizePredicate = <T extends KRecord>(
 // --- TYPE-SAFE FLUENT API BUILDERS ---
 
 interface ChainedQueryBuilder<T> {
+  select(fields: (keyof T)[]): this;
   where(predicate: Partial<T> | ((record: T) => boolean)): this;
   with(relations: QueryDescriptor['with']): this;
   limit(count: number): this;
@@ -72,6 +73,10 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
         const descriptor: QueryDescriptor = { tableName: tableName as string };
 
         const builder: ChainedQueryBuilder<S['types'][T]> = {
+          select: (fields) => {
+            descriptor.select = fields as string[];
+            return builder;
+          },
           where: (predicate) => {
             descriptor.where = normalizePredicate(predicate);
             return builder;
@@ -98,7 +103,7 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
     update: <T extends keyof S['tables']>(state: DatabaseState, tableName: T): UpdateBuilder<S['types'][T]> => ({
       set: (data) => ({
         where: (predicate) => {
-          const [newState, updatedRecords] = _updateImpl(state, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate));
+          const [newState, updatedRecords] = _updateImpl(state, schema, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate));
           return [newState, updatedRecords as S['types'][T][]];
         },
       }),

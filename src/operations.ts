@@ -18,6 +18,7 @@ export const createEmptyState = (schema: KonroSchema<any, any>): DatabaseState =
 
 export interface QueryDescriptor {
   tableName: string;
+  select?: (keyof KRecord)[];
   where?: (record: KRecord) => boolean;
   with?: Record<string, boolean | { where?: (record: KRecord) => boolean }>;
   limit?: number;
@@ -57,7 +58,23 @@ export const _queryImpl = (state: DatabaseState, schema: KonroSchema<any, any>, 
   // 3. Paginate
   const offset = descriptor.offset ?? 0;
   const limit = descriptor.limit ?? results.length;
-  return results.slice(offset, offset + limit);
+  let paginatedResults = results.slice(offset, offset + limit);
+
+  // 4. Select Fields
+  if (descriptor.select) {
+    paginatedResults = paginatedResults.map(rec => {
+      const newRec: KRecord = {};
+      for (const key of descriptor.select!) {
+        // This includes keys from `with` if the user explicitly adds them to select.
+        if (rec.hasOwnProperty(key)) {
+          newRec[key] = rec[key];
+        }
+      }
+      return newRec;
+    });
+  }
+
+  return paginatedResults;
 };
 
 const findRelatedRecords = (state: DatabaseState, record: KRecord, relationDef: RelationDefinition) => {
@@ -111,15 +128,23 @@ export const _insertImpl = (state: DatabaseState, schema: KonroSchema<any, any>,
 
 // --- UPDATE ---
 
-export const _updateImpl = (state: DatabaseState, tableName: string, data: Partial<KRecord>, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
+export const _updateImpl = (state: DatabaseState, schema: KonroSchema<any, any>, tableName: string, data: Partial<KRecord>, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
   const newState = structuredClone(state);
   const tableState = newState[tableName];
   if (!tableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
   const updatedRecords: KRecord[] = [];
 
+  const updateData = { ...data };
+  // Find the ID column from the schema and prevent it from being updated.
+  const idColumn = Object.entries(schema.tables[tableName] ?? {}).find(([, colDef]) => colDef.dataType === 'id')?.[0];
+  if (idColumn && updateData[idColumn] !== undefined) {
+    delete updateData[idColumn];
+  }
+
+
   tableState.records = tableState.records.map(record => {
     if (predicate(record)) {
-      const updatedRecord = { ...record, ...data };
+      const updatedRecord = { ...record, ...updateData };
       updatedRecords.push(updatedRecord);
       return updatedRecord;
     }

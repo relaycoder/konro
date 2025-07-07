@@ -27,43 +27,43 @@ describe('Unit > Core > Query', () => {
     it('should select all fields from a table when .select() is omitted', () => {
         const results = _queryImpl(testState, testSchema, { tableName: 'users' });
         expect(results.length).toBe(4);
-        expect(results[0]).toEqual({ id: 1, name: 'Alice', age: 30, isActive: true });
-        expect(Object.keys(results[0]).length).toBe(4);
+        expect(results[0]!).toEqual({ id: 1, name: 'Alice', age: 30, isActive: true });
+        expect(Object.keys(results[0]!).length).toBe(4);
     });
 
     it('should select only the specified fields when using .select()', () => {
         const results = _queryImpl(testState, testSchema, { tableName: 'users', select: ['name', 'age'] });
         expect(results.length).toBe(4);
-        expect(results[0]).toEqual({ name: 'Alice', age: 30 });
-        expect(Object.keys(results[0]).length).toBe(2);
+        expect(results[0]!).toEqual({ name: 'Alice', age: 30 });
+        expect(Object.keys(results[0]!).length).toBe(2);
     });
 
     it('should filter records correctly using a where function', () => {
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', where: (r) => (r.age as number) === 30 });
+        const results = _queryImpl(testState, testSchema, { tableName: 'users', where: (r) => r.age === 30 });
         expect(results.length).toBe(2);
-        expect(results[0].name).toBe('Alice');
-        expect(results[1].name).toBe('Denise');
+        expect(results[0]!.name).toBe('Alice');
+        expect(results[1]!.name).toBe('Denise');
     });
 
     it('should limit the number of returned records correctly using .limit()', () => {
         const results = _queryImpl(testState, testSchema, { tableName: 'users', limit: 2 });
         expect(results.length).toBe(2);
-        expect(results[0].id).toBe(1);
-        expect(results[1].id).toBe(2);
+        expect(results[0]!.id).toBe(1);
+        expect(results[1]!.id).toBe(2);
     });
 
     it('should skip the correct number of records using .offset()', () => {
         const results = _queryImpl(testState, testSchema, { tableName: 'users', offset: 2 });
         expect(results.length).toBe(2);
-        expect(results[0].id).toBe(3);
-        expect(results[1].id).toBe(4);
+        expect(results[0]!.id).toBe(3);
+        expect(results[1]!.id).toBe(4);
     });
 
     it('should correctly handle limit and offset together for pagination', () => {
         const results = _queryImpl(testState, testSchema, { tableName: 'users', offset: 1, limit: 2 });
         expect(results.length).toBe(2);
-        expect(results[0].id).toBe(2);
-        expect(results[1].id).toBe(3);
+        expect(results[0]!.id).toBe(2);
+        expect(results[1]!.id).toBe(3);
     });
 
     it('should return an array of all matching records when using .all()', () => {
@@ -75,14 +75,14 @@ describe('Unit > Core > Query', () => {
 
     it('should return the first matching record when using .first()', () => {
         // This is simulated by adding limit: 1
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', where: r => (r.age as number) > 28, limit: 1 });
+        const results = _queryImpl(testState, testSchema, { tableName: 'users', where: r => typeof r.age === 'number' && r.age > 28, limit: 1 });
         expect(results.length).toBe(1);
-        expect(results[0].id).toBe(1);
+        expect(results[0]!.id).toBe(1);
     });
 
     it('should return null when .first() finds no matching record', () => {
         // This is simulated by _queryImpl returning [] and the caller handling it
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', where: r => (r.age as number) > 50, limit: 1 });
+        const results = _queryImpl(testState, testSchema, { tableName: 'users', where: r => typeof r.age === 'number' && r.age > 50, limit: 1 });
         expect(results.length).toBe(0);
     });
 });

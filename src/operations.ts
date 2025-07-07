@@ -25,7 +25,7 @@ export interface QueryDescriptor {
   offset?: number;
 }
 
-export const _queryImpl = (state: DatabaseState, schema: KonroSchema<any, any>, descriptor: QueryDescriptor): KRecord[] => {
+export const _queryImpl = <S extends KonroSchema<any, any>>(state: DatabaseState, schema: S, descriptor: QueryDescriptor): KRecord[] => {
   const tableState = state[descriptor.tableName];
   if (!tableState) return [];
 
@@ -99,11 +99,12 @@ const findRelatedRecords = (state: DatabaseState, record: KRecord, relationDef: 
 
 // --- INSERT ---
 
-export const _insertImpl = (state: DatabaseState, schema: KonroSchema<any, any>, tableName: string, values: KRecord[]): [DatabaseState, KRecord[]] => {
+export const _insertImpl = <S extends KonroSchema<any, any>>(state: DatabaseState, schema: S, tableName: string, values: KRecord[]): [DatabaseState, KRecord[]] => {
   const newState = structuredClone(state);
   const tableState = newState[tableName];
   if (!tableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
   const tableSchema = schema.tables[tableName];
+  if (!tableSchema) throw KonroError(`Schema for table "${tableName}" not found.`);
   const insertedRecords: KRecord[] = [];
 
   for (const value of values) {
@@ -128,19 +129,24 @@ export const _insertImpl = (state: DatabaseState, schema: KonroSchema<any, any>,
 
 // --- UPDATE ---
 
-export const _updateImpl = (state: DatabaseState, schema: KonroSchema<any, any>, tableName: string, data: Partial<KRecord>, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
+export const _updateImpl = <S extends KonroSchema<any, any>>(state: DatabaseState, schema: S, tableName: string, data: Partial<KRecord>, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
   const newState = structuredClone(state);
   const tableState = newState[tableName];
   if (!tableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
+  
+  const tableSchema = schema.tables[tableName];
+  if (!tableSchema) {
+    throw KonroError(`Schema for table "${tableName}" not found.`);
+  }
+  
   const updatedRecords: KRecord[] = [];
 
   const updateData = { ...data };
   // Find the ID column from the schema and prevent it from being updated.
-  const idColumn = Object.entries(schema.tables[tableName] ?? {}).find(([, colDef]) => colDef.dataType === 'id')?.[0];
+  const idColumn = Object.entries(tableSchema).find(([, colDef]) => colDef.dataType === 'id')?.[0];
   if (idColumn && updateData[idColumn] !== undefined) {
     delete updateData[idColumn];
   }
-
 
   tableState.records = tableState.records.map(record => {
     if (predicate(record)) {

@@ -23,7 +23,11 @@ export interface NumberColumnOptions extends ColumnOptions<number> {
 export interface ColumnDefinition<T> {
   _type: 'column';
   dataType: 'id' | 'string' | 'number' | 'boolean' | 'date' | 'object';
-  options?: ColumnOptions<T>;
+  options?: T extends string
+    ? StringColumnOptions
+    : T extends number
+    ? NumberColumnOptions
+    : ColumnOptions<T>;
   _tsType: T; // For TypeScript inference only
 }
 
@@ -68,9 +72,15 @@ export interface KonroSchema<
 export const id = (): ColumnDefinition<number> => ({ _type: 'column', dataType: 'id', options: { unique: true }, _tsType: 0 });
 export const string = (options?: StringColumnOptions): ColumnDefinition<string> => ({ _type: 'column', dataType: 'string', options, _tsType: '' });
 export const number = (options?: NumberColumnOptions): ColumnDefinition<number> => ({ _type: 'column', dataType: 'number', options, _tsType: 0 });
-export const boolean = (options?: ColumnOptions<boolean>): ColumnDefinition<boolean> => ({ _type: 'column', dataType: 'boolean', options, _tsType: false });
+export const boolean = (options?: ColumnOptions<boolean>): ColumnDefinition<boolean> => {
+  const def: ColumnDefinition<boolean> = { _type: 'column', dataType: 'boolean', options, _tsType: false };
+  return def;
+};
 export const date = (options?: ColumnOptions<Date>): ColumnDefinition<Date> => ({ _type: 'column', dataType: 'date', options, _tsType: new Date() });
-export const object = <T extends Record<string, any>>(options?: ColumnOptions<T>): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options, _tsType: {} as T });
+export const object = <T extends Record<string, any>>(options?: ColumnOptions<T>): ColumnDefinition<T> => {
+  const def: ColumnDefinition<T> = { _type: 'column', dataType: 'object', options, _tsType: undefined! };
+  return def;
+};
 
 export const one = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'one', targetTable, ...options });
 export const many = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'many', targetTable, ...options });
@@ -82,7 +92,7 @@ type SchemaInputDef<T> = {
   relations?: (tables: T) => Record<string, Record<string, RelationDefinition>>;
 };
 
-export function createSchema<const TDef extends SchemaInputDef<Record<string, Record<string, ColumnDefinition<any>>>>>(definition: TDef) {
+export function createSchema<const TDef extends SchemaInputDef<any>>(definition: TDef) {
   const relations = definition.relations ? definition.relations(definition.tables) : {};
   return {
     tables: definition.tables,

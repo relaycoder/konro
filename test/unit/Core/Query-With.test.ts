@@ -42,10 +42,12 @@ describe('Unit > Core > Query-With', () => {
         });
 
         expect(results.length).toBe(1);
-        const post = results[0];
-        expect(post.author).toBeDefined();
-        expect(post.author.id).toBe(1);
-        expect(post.author.name).toBe('Alice');
+        const post = results[0]!;
+        expect(post).toBeDefined();
+        const author = post.author as {id: unknown, name: unknown};
+        expect(author).toBeDefined();
+        expect(author.id).toBe(1);
+        expect(author.name).toBe('Alice');
     });
 
     it('should resolve a `many` relationship and attach it as an array', () => {
@@ -56,12 +58,13 @@ describe('Unit > Core > Query-With', () => {
         });
 
         expect(results.length).toBe(1);
-        const user = results[0];
-        expect(user.posts).toBeDefined();
-        expect(user.posts).toBeInstanceOf(Array);
-        expect(user.posts.length).toBe(2);
-        expect(user.posts[0].title).toBe('Alice Post 1');
-        expect(user.posts[1].title).toBe('Alice Post 2');
+        const user = results[0]!;
+        expect(user).toBeDefined();
+        const posts = user.posts as {title: unknown}[];
+        expect(posts).toBeInstanceOf(Array);
+        expect(posts.length).toBe(2);
+        expect(posts[0]!.title).toBe('Alice Post 1');
+        expect(posts[1]!.title).toBe('Alice Post 2');
     });
 
     it('should filter nested records within a .with() clause', () => {
@@ -70,16 +73,17 @@ describe('Unit > Core > Query-With', () => {
             where: r => r.id === 1,
             with: {
                 posts: {
-                    where: (post) => (post.title as string).includes('Post 2')
+                    where: (post) => typeof post.title === 'string' && post.title.includes('Post 2')
                 }
             }
         });
 
         expect(results.length).toBe(1);
-        const user = results[0];
-        expect(user.posts).toBeDefined();
-        expect(user.posts.length).toBe(1);
-        expect(user.posts[0].id).toBe(12);
+        const user = results[0]!;
+        const posts = user.posts as {id: unknown}[];
+        expect(posts).toBeDefined();
+        expect(posts.length).toBe(1);
+        expect(posts[0]!.id).toBe(12);
     });
 
     it('should handle multiple relations at once', () => {
@@ -93,11 +97,13 @@ describe('Unit > Core > Query-With', () => {
         });
         
         expect(results.length).toBe(1);
-        const user = results[0];
-        expect(user.posts).toBeInstanceOf(Array);
-        expect(user.posts.length).toBe(2);
-        expect(user.profile).toBeDefined();
-        expect(user.profile.bio).toBe('Bio for Alice');
+        const user = results[0]!;
+        const posts = user.posts as unknown[];
+        const profile = user.profile as { bio: unknown };
+        expect(posts).toBeInstanceOf(Array);
+        expect(posts.length).toBe(2);
+        expect(profile).toBeDefined();
+        expect(profile.bio).toBe('Bio for Alice');
     });
 
     it('should return null for a `one` relation if no related record is found', () => {
@@ -108,13 +114,13 @@ describe('Unit > Core > Query-With', () => {
         });
 
         expect(results.length).toBe(1);
-        const user = results[0];
+        const user = results[0]!;
         expect(user.profile).toBeNull();
     });
 
     it('should return an empty array for a `many` relation if no related records are found', () => {
         // Add a user with no posts
-        testState.users.records.push({ id: 3, name: 'Charlie' });
+        testState.users!.records.push({ id: 3, name: 'Charlie' });
         const results = _queryImpl(testState, testSchema, {
             tableName: 'users',
             where: r => r.id === 3,
@@ -122,8 +128,8 @@ describe('Unit > Core > Query-With', () => {
         });
 
         expect(results.length).toBe(1);
-        const user = results[0];
+        const user = results[0]!;
         expect(user.posts).toBeInstanceOf(Array);
-        expect(user.posts.length).toBe(0);
+        expect((user.posts as unknown[]).length).toBe(0);
     });
 });

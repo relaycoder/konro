@@ -49,8 +49,8 @@ describe('Unit > Validation > Constraints', () => {
     
     it('should throw a KonroValidationError on update for a non-unique value', () => {
         // Add another user to create conflict
-        testState.users.records.push({ id: 2, name: 'Charlie', email: 'charlie@example.com', age: 40, isActive: true });
-        testState.users.meta.lastId = 2;
+        testState.users!.records.push({ id: 2, name: 'Charlie', email: 'charlie@example.com', age: 40, isActive: true });
+        testState.users!.meta.lastId = 2;
 
         const predicate = (r: any) => r.id === 2;
         const data = { email: 'alice@example.com' }; // Try to update charlie's email to alice's

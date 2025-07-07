@@ -27,17 +27,17 @@ describe('Unit > Core > Delete', () => {
         const [newState] = _deleteImpl(testState, 'users', (r) => r.id === 1);
         
         expect(newState).not.toBe(originalState);
-        expect(originalState.users.records.length).toBe(3);
-        expect(newState.users.records.length).toBe(2);
+        expect(originalState.users!.records.length).toBe(3);
+        expect(newState.users!.records.length).toBe(2);
     });
 
     it('should only delete records that match the predicate function', () => {
-        const [newState, deleted] = _deleteImpl(testState, 'users', (r) => (r.age as number) > 35);
+        const [newState, deleted] = _deleteImpl(testState, 'users', (r) => typeof r.age === 'number' && r.age > 35);
         
         expect(deleted.length).toBe(1);
-        expect(deleted[0].id).toBe(3);
-        expect(newState.users.records.length).toBe(2);
-        expect(newState.users.records.find(u => u.id === 3)).toBeUndefined();
+        expect(deleted[0]!.id).toBe(3);
+        expect(newState.users!.records.length).toBe(2);
+        expect(newState.users!.records.find(u => u.id === 3)).toBeUndefined();
     });
 
     it('should return both the new state and an array of the full, deleted records in the result tuple', () => {
@@ -46,11 +46,11 @@ describe('Unit > Core > Delete', () => {
         expect(newState).toBeDefined();
         expect(deleted).toBeInstanceOf(Array);
         expect(deleted.length).toBe(1);
-        expect(deleted[0]).toEqual({ id: 2, name: 'Bob', email: 'b@b.com', age: 25 });
+        expect(deleted[0]!).toEqual({ id: 2, name: 'Bob', email: 'b@b.com', age: 25 });
     });
 
     it('should not modify the table meta lastId on delete', () => {
         const [newState] = _deleteImpl(testState, 'users', (r) => r.id === 3);
-        expect(newState.users.meta.lastId).toBe(3);
+        expect(newState.users!.meta.lastId).toBe(3);
     });
 });

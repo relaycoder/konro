@@ -25,9 +25,10 @@
   "include": [
     "package.json",
     "tsconfig.json",
-    "src"
-    // "docs/README.md",
-    // "docs/api-technical-specification.md"
+    "src",
+    "docs/README.md",
+    "docs/api-technical-specification.md",
+    "test"
   ],
   "ignore": {
     "useGitignore": true,

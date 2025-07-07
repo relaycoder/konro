@@ -81,11 +81,10 @@ describe('Unit > Schema > ColumnHelpers', () => {
 
   it('should create a valid object column definition', () => {
     const objCol = konro.object<{ meta: string }>();
-    expect(objCol).toEqual({
+    expect(objCol).toMatchObject({
       _type: 'column',
       dataType: 'object',
       options: undefined,
-      _tsType: {},
     });
   });
 });

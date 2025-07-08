@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { konro } from '../../../src/index';
-import { testSchema, TEST_DIR, cleanup, ensureTestDir } from '../../util';
+import { testSchema, TEST_DIR, cleanup, ensureTestDir, UserCreate } from '../../util';
 import path from 'path';
 import type { DatabaseState } from '../../../src/types';
 
@@ -18,7 +18,7 @@ describe('E2E > ErrorAndEdgeCases > Pagination', () => {
     beforeEach(async () => {
         await ensureTestDir();
         let state: DatabaseState = db.createEmptyState();
-        const usersToInsert = [];
+        const usersToInsert: UserCreate[] = [];
         for (let i = 1; i <= 100; i++) {
             usersToInsert.push({
                 name: `User ${i}`,
@@ -33,28 +33,28 @@ describe('E2E > ErrorAndEdgeCases > Pagination', () => {
 
     it('should correctly paginate through a large set of records from a file', async () => {
         const state = await db.read();
-        expect(state.users.records.length).toBe(100);
+        expect(state.users!.records.length).toBe(100);
 
         // Get page 1 (items 1-10)
-        const page1 = db.query(state).from('users').limit(10).offset(0).all();
+        const page1 = await db.query(state).from('users').limit(10).offset(0).all();
         expect(page1.length).toBe(10);
         expect(page1[0]?.name).toBe('User 1');
         expect(page1[9]?.name).toBe('User 10');
 
         // Get page 2 (items 11-20)
-        const page2 = db.query(state).from('users').limit(10).offset(10).all();
+        const page2 = await db.query(state).from('users').limit(10).offset(10).all();
         expect(page2.length).toBe(10);
         expect(page2[0]?.name).toBe('User 11');
         expect(page2[9]?.name).toBe('User 20');
         
         // Get the last page, which might be partial
-        const lastPage = db.query(state).from('users').limit(10).offset(95).all();
+        const lastPage = await db.query(state).from('users').limit(10).offset(95).all();
         expect(lastPage.length).toBe(5);
         expect(lastPage[0]?.name).toBe('User 96');
         expect(lastPage[4]?.name).toBe('User 100');
 
         // Get an empty page beyond the end
-        const emptyPage = db.query(state).from('users').limit(10).offset(100).all();
+        const emptyPage = await db.query(state).from('users').limit(10).offset(100).all();
         expect(emptyPage.length).toBe(0);
     });
 });

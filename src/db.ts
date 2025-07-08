@@ -44,14 +44,15 @@ interface DeleteBuilder<T> {
 export interface DbContext<S extends KonroSchema<any, any>> {
   schema: S;
   adapter: StorageAdapter;
-  read(): Promise<DatabaseState>;
-  write(state: DatabaseState): Promise<void>;
-  createEmptyState(): DatabaseState;
+  read(): Promise<DatabaseState<S>>;
+  write(state: DatabaseState<S>): Promise<void>;
+  createEmptyState(): DatabaseState<S>;
 
-  query(state: DatabaseState): QueryBuilder<S>;
-  insert<T extends keyof S['types']>(state: DatabaseState, tableName: T, values: S['types'][T] | Readonly<S['types'][T]>[]): [DatabaseState, S['types'][T] | S['types'][T][]];
-  update<T extends keyof S['tables']>(state: DatabaseState, tableName: T): UpdateBuilder<S['types'][T]>;
-  delete<T extends keyof S['tables']>(state: DatabaseState, tableName: T): DeleteBuilder<S['types'][T]>;
+  query(state: DatabaseState<S>): QueryBuilder<S>;
+  insert<T extends keyof S['types']>(state: DatabaseState<S>, tableName: T, values: S['create'][T]): [DatabaseState<S>, S['types'][T]];
+  insert<T extends keyof S['types']>(state: DatabaseState<S>, tableName: T, values: Readonly<S['create'][T]>[]): [DatabaseState<S>, S['types'][T][]];
+  update<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): UpdateBuilder<S['types'][T]>;
+  delete<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): DeleteBuilder<S['types'][T]>;
 }
 
 export const createDatabase = <S extends KonroSchema<any, any>>(options: { schema: S, adapter: StorageAdapter }): DbContext<S> => {
@@ -64,14 +65,21 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
     write: (state) => adapter.write(state),
     createEmptyState: () => createEmptyStateImpl(schema),
 
-    insert: (state, tableName, values) => {
+    insert: (<T extends keyof S['types']>(
+      state: DatabaseState<S>,
+      tableName: T,
+      values: S['create'][T] | Readonly<S['create'][T]>[]
+    ): [DatabaseState<S>, S['types'][T] | S['types'][T][]] => {
       const valsArray = Array.isArray(values) ? values : [values];
-      const [newState, inserted] = _insertImpl(state, schema, tableName as string, valsArray as KRecord[]);
+      const [newState, inserted] = _insertImpl(state as DatabaseState, schema, tableName as string, valsArray as KRecord[]);
       const result = Array.isArray(values) ? inserted : inserted[0];
-      return [newState, result] as [DatabaseState, S['types'][typeof tableName] | S['types'][typeof tableName][]];
+      return [newState as DatabaseState<S>, result] as [DatabaseState<S>, S['types'][T] | S['types'][T][]];
+    }) as {
+      <T extends keyof S['types']>(state: DatabaseState<S>, tableName: T, values: S['create'][T]): [DatabaseState<S>, S['types'][T]];
+      <T extends keyof S['types']>(state: DatabaseState<S>, tableName: T, values: Readonly<S['create'][T]>[]): [DatabaseState<S>, S['types'][T][]];
     },
 
-    query: (state: DatabaseState): QueryBuilder<S> => ({
+    query: (state: DatabaseState<S>): QueryBuilder<S> => ({
       from: <T extends keyof S['tables']>(tableName: T): ChainedQueryBuilder<S['types'][T]> => {
         const descriptor: QueryDescriptor = { tableName: tableName as string };
 
@@ -81,7 +89,7 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
             return builder;
           },
           where: (predicate) => {
-            descriptor.where = normalizePredicate(predicate);
+            descriptor.where = normalizePredicate(predicate as (record: KRecord) => boolean);
             return builder;
           },
           with: (relations) => {
@@ -96,30 +104,30 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
             descriptor.offset = count;
             return builder;
           },
-          all: async () => _queryImpl(state, schema, descriptor) as S['types'][T][],
-          first: async () => (_queryImpl(state, schema, { ...descriptor, limit: 1 })[0] ?? null) as S['types'][T] | null,
-          aggregate: async <TAggs extends Record<string, AggregationDefinition>>(aggregations: TAggs) => {
+          all: async (): Promise<S['types'][T][]> => _queryImpl(state as DatabaseState, schema, descriptor) as any,
+          first: async (): Promise<S['types'][T] | null> => (_queryImpl(state as DatabaseState, schema, { ...descriptor, limit: 1 })[0] ?? null) as any,
+          aggregate: async <TAggs extends Record<string, AggregationDefinition>>(aggregations: TAggs): Promise<{ [K in keyof TAggs]: number | null }> => {
             const aggDescriptor: AggregationDescriptor = { ...descriptor, aggregations };
-            return _aggregateImpl(state, schema, aggDescriptor) as { [K in keyof TAggs]: number | null };
+            return _aggregateImpl(state as DatabaseState, schema, aggDescriptor) as { [K in keyof TAggs]: number | null };
           },
         };
         return builder;
       },
     }),
 
-    update: <T extends keyof S['tables']>(state: DatabaseState, tableName: T): UpdateBuilder<S['types'][T]> => ({
+    update: <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): UpdateBuilder<S['types'][T]> => ({
       set: (data) => ({
         where: async (predicate) => {
-          const [newState, updatedRecords] = _updateImpl(state, schema, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate));
-          return [newState, updatedRecords as S['types'][T][]];
+          const [newState, updatedRecords] = _updateImpl(state as DatabaseState, schema, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate as (record: KRecord) => boolean));
+          return [newState as DatabaseState<S>, updatedRecords as S['types'][T][]];
         },
       }),
     }),
 
-    delete: <T extends keyof S['tables']>(state: DatabaseState, tableName: T): DeleteBuilder<S['types'][T]> => ({
+    delete: <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): DeleteBuilder<S['types'][T]> => ({
       where: async (predicate) => {
-        const [newState, deletedRecords] = _deleteImpl(state, tableName as string, normalizePredicate(predicate));
-        return [newState, deletedRecords as S['types'][T][]];
+        const [newState, deletedRecords] = _deleteImpl(state as DatabaseState, tableName as string, normalizePredicate(predicate as (record: KRecord) => boolean));
+        return [newState as DatabaseState<S>, deletedRecords as S['types'][T][]];
       },
     }),
   };

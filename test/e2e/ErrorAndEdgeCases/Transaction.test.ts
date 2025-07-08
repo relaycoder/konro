@@ -58,7 +58,7 @@ describe('E2E > ErrorAndEdgeCases > Transaction', () => {
         
         // Read the state to perform an update
         let currentState = await db.read();
-        const [newState] = db.update(currentState, 'users')
+        const [newState] = await db.update(currentState, 'users')
             .set({ name: 'This Should Not Be Set' })
             .where({ id: 999 }); // This matches no records
         

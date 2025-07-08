@@ -60,6 +60,8 @@ export const schemaDef = {
 
 export const testSchema = konro.createSchema(schemaDef);
 
+export type UserCreate = typeof testSchema.create.users;
+
 // --- Test Utilities ---
 
 export const cleanup = async () => {

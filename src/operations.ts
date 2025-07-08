@@ -6,10 +6,11 @@ import { KonroError, KonroValidationError } from './utils/error.util';
 
 
 /** Creates a pristine, empty database state from a schema. */
-export const createEmptyState = (schema: KonroSchema<any, any>): DatabaseState => {
-  const state: DatabaseState = {};
+export const createEmptyState = <S extends KonroSchema<any, any>>(schema: S): DatabaseState<S> => {
+  const state = {} as DatabaseState<S>;
   for (const tableName in schema.tables) {
-    state[tableName] = { records: [], meta: { lastId: 0 } };
+    // This is a controlled cast, safe because we are iterating over the schema's tables.
+    (state as any)[tableName] = { records: [], meta: { lastId: 0 } };
   }
   return state;
 };

@@ -8,8 +8,8 @@ import { readFile, writeAtomic } from './utils/fs.util';
 import { TEMP_FILE_SUFFIX } from './utils/constants';
 
 export interface StorageAdapter {
-  read(schema: KonroSchema<any, any>): Promise<DatabaseState>;
-  write(state: DatabaseState): Promise<void>;
+  read<S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>>;
+  write(state: DatabaseState<any>): Promise<void>;
 }
 
 type SingleFileStrategy = { single: { filepath: string }; multi?: never; };
@@ -23,18 +23,18 @@ export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter =
   const serializer = getSerializer(options.format);
   const fileExtension = `.${options.format}`;
 
-  const readSingle = async (schema: KonroSchema<any, any>): Promise<DatabaseState> => {
+  const readSingle = async <S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>> => {
     const filepath = options.single!.filepath;
     const data = await readFile(filepath);
-    return data ? serializer.parse<DatabaseState>(data) : createEmptyState(schema);
+    return data ? serializer.parse<DatabaseState<S>>(data) : createEmptyState(schema);
   };
 
-  const writeSingle = async (state: DatabaseState): Promise<void> => {
+  const writeSingle = async (state: DatabaseState<any>): Promise<void> => {
     const filepath = options.single!.filepath;
     await writeAtomic(filepath, serializer.stringify(state));
   };
   
-  const readMulti = async (schema: KonroSchema<any, any>): Promise<DatabaseState> => {
+  const readMulti = async <S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>> => {
     const dir = options.multi!.dir;
     const state = createEmptyState(schema);
     await fs.mkdir(dir, { recursive: true });
@@ -43,13 +43,14 @@ export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter =
       const filepath = path.join(dir, `${tableName}${fileExtension}`);
       const data = await readFile(filepath);
       if (data) {
-        state[tableName] = serializer.parse(data);
+        // This is a controlled cast, safe because we are iterating over the schema's tables.
+        (state as any)[tableName] = serializer.parse(data);
       }
     }
     return state;
   };
   
-  const writeMulti = async (state: DatabaseState): Promise<void> => {
+  const writeMulti = async (state: DatabaseState<any>): Promise<void> => {
     const dir = options.multi!.dir;
     await fs.mkdir(dir, { recursive: true });
     

@@ -41,41 +41,41 @@ describe('E2E > SingleFileJson > FullLifecycle', () => {
 
     // 3. Read back and verify data integrity
     let readState = await db.read();
-    expect(readState.users.records.length).toBe(1);
-    expect(readState.posts.records.length).toBe(1);
-    expect(readState.users.records[0]?.name).toBe('E2E User');
+    expect(readState.users!.records.length).toBe(1);
+    expect(readState.posts!.records.length).toBe(1);
+    expect(readState.users!.records[0]?.name).toBe('E2E User');
 
     // 4. Perform a complex query with relations on the re-read state
-    const userWithPosts = db.query(readState)
+    const userWithPosts = await db.query(readState)
       .from('users')
       .where({ id: user.id })
       .with({ posts: true })
       .first();
     
     expect(userWithPosts).toBeDefined();
-    expect(userWithPosts?.posts.length).toBe(1);
-    expect(userWithPosts?.posts[0]?.title).toBe('E2E Post');
+    expect(userWithPosts!.posts.length).toBe(1);
+    expect(userWithPosts!.posts[0]?.title).toBe('E2E Post');
 
     // 5. Update a record, write the change, and read back to confirm
-    const [s3, updatedPosts] = db.update(readState, 'posts')
+    const [s3, updatedPosts] = await db.update(readState, 'posts')
         .set({ title: 'Updated E2E Post' })
         .where({ id: post.id });
     expect(updatedPosts.length).toBe(1);
     await db.write(s3);
     
     let stateAfterUpdate = await db.read();
-    const updatedPostFromDisk = db.query(stateAfterUpdate).from('posts').where({ id: post.id }).first();
+    const updatedPostFromDisk = await db.query(stateAfterUpdate).from('posts').where({ id: post.id }).first();
     expect(updatedPostFromDisk?.title).toBe('Updated E2E Post');
 
     // 6. Delete a record, write, and confirm it's gone
-    const [s4, deletedUsers] = db.delete(stateAfterUpdate, 'users')
+    const [s4, deletedUsers] = await db.delete(stateAfterUpdate, 'users')
         .where({ id: user.id });
     expect(deletedUsers.length).toBe(1);
     await db.write(s4);
 
     let finalState = await db.read();
-    expect(finalState.users.records.length).toBe(0);
+    expect(finalState.users!.records.length).toBe(0);
     // The post should also effectively be orphaned, let's check it's still there
-    expect(finalState.posts.records.length).toBe(1);
+    expect(finalState.posts!.records.length).toBe(1);
   });
 });

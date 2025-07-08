@@ -53,10 +53,31 @@ export interface AggregationDefinition {
 
 // --- TYPE INFERENCE MAGIC ---
 
-type BaseModels<TTables extends Record<string, Record<string, ColumnDefinition<any>>>> = {
+// Find keys for ID columns
+type IdKey<TTableDef extends Record<string, ColumnDefinition<any>>> = {
+    [K in keyof TTableDef]: TTableDef[K]['dataType'] extends 'id' ? K : never;
+}[keyof TTableDef];
+
+// Find keys for columns with defaults
+type WithDefaultKey<TTableDef extends Record<string, ColumnDefinition<any>>> = {
+    [K in keyof TTableDef]: TTableDef[K]['options'] extends { default: any } ? K : never;
+}[keyof TTableDef];
+
+type CreateModel<TTableDef extends Record<string, ColumnDefinition<any>>> = Pretty<
+    // Fields with defaults are optional
+    Partial<{ [K in WithDefaultKey<TTableDef>]: TTableDef[K]['_tsType'] }> &
+    // All other fields, except the ID and defaults, are required
+    { [K in Exclude<keyof TTableDef, IdKey<TTableDef> | WithDefaultKey<TTableDef>>]: TTableDef[K]['_tsType'] }
+>;
+
+export type BaseModels<TTables extends Record<string, Record<string, ColumnDefinition<any>>>> = {
   [TableName in keyof TTables]: {
     [ColumnName in keyof TTables[TableName]]: TTables[TableName][ColumnName]['_tsType'];
   };
+};
+
+type CreateModels<TTables extends Record<string, Record<string, ColumnDefinition<any>>>> = {
+    [TableName in keyof TTables]: CreateModel<TTables[TableName]>
 };
 
 type WithRelations<
@@ -77,6 +98,7 @@ export interface KonroSchema<
   tables: TTables;
   relations: TRelations;
   types: Pretty<WithRelations<BaseModels<TTables>, TRelations>>;
+  create: CreateModels<TTables>;
 }
 
 // --- SCHEMA HELPERS ---
@@ -112,6 +134,7 @@ export function createSchema<const TDef extends SchemaInputDef<any>>(definition:
     tables: definition.tables,
     relations,
     types: null as any, // This is a runtime placeholder for the inferred types
+    create: null as any, // This is a runtime placeholder for the create types
   } as KonroSchema<
     TDef['tables'],
     TDef['relations'] extends (...args: any) => any ? ReturnType<TDef['relations']> : {}

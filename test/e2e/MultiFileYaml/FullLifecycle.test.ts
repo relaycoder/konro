@@ -26,7 +26,6 @@ describe('E2E > MultiFileYaml > FullLifecycle', () => {
     
     // Check that empty files are created
     const usersFilePath = path.join(dbDirPath, 'users.yaml');
-    const postsFilePath = path.join(dbDirPath, 'posts.yaml');
     let usersFileContent = await fs.readFile(usersFilePath, 'utf-8');
     expect(yaml.load(usersFileContent)).toEqual({ records: [], meta: { lastId: 0 } });
 
@@ -37,27 +36,27 @@ describe('E2E > MultiFileYaml > FullLifecycle', () => {
 
     // 3. Read back and verify integrity from separate files
     const readState = await db.read();
-    expect(readState.users.records.length).toBe(1);
-    expect(readState.posts.records.length).toBe(1);
-    expect(readState.users.records[0]?.id).toBe(user.id);
+    expect(readState.users!.records.length).toBe(1);
+    expect(readState.posts!.records.length).toBe(1);
+    expect(readState.users!.records[0]?.id).toBe(user.id);
 
     // 4. Query with relations
-    const userWithPosts = db.query(readState).from('users').where({ id: user.id }).with({ posts: true }).first();
+    const userWithPosts = await db.query(readState).from('users').where({ id: user.id }).with({ posts: true }).first();
     expect(userWithPosts).toBeDefined();
-    expect(userWithPosts?.posts.length).toBe(1);
-    expect(userWithPosts?.posts[0]?.title).toBe('YAML Post');
+    expect(userWithPosts!.posts.length).toBe(1);
+    expect(userWithPosts!.posts[0]?.title).toBe('YAML Post');
 
     // 5. Update and write
-    const [s3] = db.update(readState, 'users').set({ name: 'Updated Yaml User' }).where({ id: user.id });
+    const [s3] = await db.update(readState, 'users').set({ name: 'Updated Yaml User' }).where({ id: user.id });
     await db.write(s3);
     const stateAfterUpdate = await db.read();
-    expect(stateAfterUpdate.users.records[0]?.name).toBe('Updated Yaml User');
+    expect(stateAfterUpdate.users!.records[0]?.name).toBe('Updated Yaml User');
 
     // 6. Delete and write
-    const [s4] = db.delete(stateAfterUpdate, 'posts').where({ authorId: user.id });
+    const [s4] = await db.delete(stateAfterUpdate, 'posts').where({ authorId: user.id });
     await db.write(s4);
     const finalState = await db.read();
-    expect(finalState.posts.records.length).toBe(0);
-    expect(finalState.users.records.length).toBe(1);
+    expect(finalState.posts!.records.length).toBe(0);
+    expect(finalState.users!.records.length).toBe(1);
   });
 });

@@ -25,18 +25,23 @@
   "include": [
     "package.json",
     "tsconfig.json",
-    // "src",
-    "src/index.ts",
+    "src",
+    // "src/index.ts",
     "README.md",
-    "docs/api-technical-specification.md",
-    "docs/test.plan.md",
-    "docs/test.rule.md",
-    "test"
+    // "docs/api-technical-specification.md",
+    // "docs/test.plan.md",
+    // "docs/test.rule.md",
+    "test/integration",
+    // "test/e2e",
+    "test/util.ts"
   ],
   "ignore": {
     "useGitignore": true,
     "useDefaultPatterns": true,
-    "customPatterns": []
+    "customPatterns": [
+      "test/unit",
+      "src/utils"
+    ]
   },
   "security": {
     "enableSecurityCheck": true

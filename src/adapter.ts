@@ -1,11 +1,9 @@
-import { promises as fs } from 'fs';
 import path from 'path';
 import { DatabaseState } from './types';
 import { createEmptyState } from './operations';
 import { KonroSchema } from './schema';
 import { getSerializer } from './utils/serializer.util';
-import { readFile, writeAtomic } from './utils/fs.util';
-import { TEMP_FILE_SUFFIX } from './utils/constants';
+import { FsProvider, defaultFsProvider, writeAtomic } from './fs';
 import { KonroStorageError } from './utils/error.util';
 
 export interface StorageAdapter {
@@ -18,15 +16,17 @@ type MultiFileStrategy = { multi: { dir: string }; single?: never; };
 
 export type FileAdapterOptions = {
   format: 'json' | 'yaml';
+  fs?: FsProvider;
 } & (SingleFileStrategy | MultiFileStrategy);
 
 export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter => {
   const serializer = getSerializer(options.format);
   const fileExtension = `.${options.format}`;
+  const fs = options.fs ?? defaultFsProvider;
 
   const readSingle = async <S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>> => {
     const filepath = options.single!.filepath;
-    const data = await readFile(filepath);
+    const data = await fs.readFile(filepath);
     if (!data) return createEmptyState(schema);
     try {
       return serializer.parse<DatabaseState<S>>(data);
@@ -37,7 +37,7 @@ export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter =
 
   const writeSingle = async (state: DatabaseState<any>): Promise<void> => {
     const filepath = options.single!.filepath;
-    await writeAtomic(filepath, serializer.stringify(state));
+    await writeAtomic(filepath, serializer.stringify(state), fs);
   };
   
   const readMulti = async <S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>> => {
@@ -47,7 +47,7 @@ export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter =
 
     for (const tableName in schema.tables) {
       const filepath = path.join(dir, `${tableName}${fileExtension}`);
-      const data = await readFile(filepath);
+      const data = await fs.readFile(filepath);
       if (data) {
         try {
           // This is a controlled cast, safe because we are iterating over the schema's tables.
@@ -62,25 +62,14 @@ export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter =
   
   const writeMulti = async (state: DatabaseState<any>): Promise<void> => {
     const dir = options.multi!.dir;
-    await fs.mkdir(dir, { recursive: true });
-    
-    // As per spec, write all to temp files first
-    const tempWrites = Object.entries(state).map(async ([tableName, tableState]) => {
+    await fs.mkdir(dir, { recursive: true }); // Ensure directory exists
+
+    const writes = Object.entries(state).map(([tableName, tableState]) => {
       const filepath = path.join(dir, `${tableName}${fileExtension}`);
-      const tempFilepath = `${filepath}.${Date.now()}${TEMP_FILE_SUFFIX}`;
       const content = serializer.stringify(tableState);
-      await fs.writeFile(tempFilepath, content, 'utf-8');
-      return { tempFilepath, filepath };
-    });
-
-    const writtenFiles = await Promise.all(tempWrites);
-
-    // Then rename all
-    const renames = writtenFiles.map(({ tempFilepath, filepath }) =>
-      fs.rename(tempFilepath, filepath)
-    );
-
-    await Promise.all(renames);
+      return writeAtomic(filepath, content, fs);
+    });
+    await Promise.all(writes);
   };
 
   if (options.single) {

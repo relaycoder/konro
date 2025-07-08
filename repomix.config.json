@@ -25,10 +25,7 @@
   "include": [
     "package.json",
     "tsconfig.json",
-    "src/db.ts",
-    "src/operations.ts", 
-    "src/schema.ts",
-    "test/unit/Core/Query-With.test.ts",
+    "src",
     "README.md"
   ],
   "ignore": {

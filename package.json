@@ -1,14 +1,44 @@
 {
   "name": "konro",
-  "module": "src/index.ts",
+  "version": "0.1.0",
+  "description": "A type-safe, functional micro-ORM for JSON/YAML files.",
   "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/relaycoder/konro.git"
+  },
+  "keywords": [
+    "orm",
+    "json",
+    "yaml",
+    "database",
+    "typescript",
+    "local-first",
+    "immutable",
+    "functional"
+  ],
+  "author": "relaycoder",
+  "license": "MIT",
   "devDependencies": {
     "@types/bun": "latest",
     "@types/js-yaml": "^4.0.9",
     "@typescript-eslint/eslint-plugin": "^8.36.0",
     "@typescript-eslint/parser": "^8.36.0",
     "eslint": "^9.30.1",
-    "typescript": "^5.8.3"
+    "tsup": "^8.5.0",
+    "typescript": "^5.5.4"
   },
   "peerDependencies": {
     "js-yaml": "^4.1.0",
@@ -20,6 +50,9 @@
     }
   },
   "scripts": {
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build"
   }
 }

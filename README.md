@@ -1,15 +1,7 @@
-Based on the description of the changes you've made to improve the type safety of eager loading, I will update the `README.md` to reflect these enhancements. The main changes will be:
-
-1.  I'll update the "Core Principles" section to highlight the new precision of the type inference for relational queries.
-2.  I'll add a new "Advanced Queries with `.with()`" subsection to explain how to use nested filters, selections, and eager-loading, and I'll clarify the mutual exclusivity of `select` and nested `with` clauses.
-
-This will provide users with a clear understanding of the query builder's advanced capabilities and its improved type safety.
-
-```typescript // README.md
 # Konro: The Type-Safe, Functional ORM for JSON/YAML
 
 <p align="center">
-  <img src="https://i.imgur.com/vHq4gXz.png" alt="Konro Logo - A bowl of soup representing the database state, with spices (functions) being added" width="200" />
+  <img src="https://i.imgur.com/6s2uA4Z.jpeg" alt="Konro Logo - A bowl of soup representing the database state, with spices (functions) being added" width="200" />
 </p>
 
 <p align="center">
@@ -17,11 +9,11 @@ This will provide users with a clear understanding of the query builder's advanc
 </p>
 
 <p align="center">
-  <a href="https://nodei.co/npm/konro-db/"><img src="https://nodei.co/npm/konro-db.png?downloads=true&compact=true" alt="NPM"></a>
+  <a href="https://nodei.co/npm/konro/"><img src="https://nodei.co/npm/konro.png?downloads=true&compact=true" alt="NPM"></a>
   <br>
-  <img alt="npm" src="https://img.shields.io/npm/v/konro-db?style=for-the-badge&color=c43a3a">
-  <img alt="Build" src="https://img.shields.io/github/actions/workflow/status/your-repo/konro/ci.yml?style=for-the-badge&logo=github">
-  <img alt="License" src="https://img.shields.io/npm/l/konro-db?style=for-the-badge">
+  <img alt="npm" src="https://img.shields.io/npm/v/konro?style=for-the-badge&color=c43a3a">
+  <img alt="Build" src="https://img.shields.io/github/actions/workflow/status/relaycoder/konro/ci.yml?style=for-the-badge&logo=github">
+  <img alt="License" src="https://img.shields.io/npm/l/konro?style=for-the-badge">
 </p>
 
 ---
@@ -526,5 +518,4 @@ Konro is a community-driven project. Contributions are warmly welcome. Whether i
 
 ## 13. License
 
-[MIT](./LICENSE) © [Your Name]
-```
+[MIT](./LICENSE) © [relaycoder]

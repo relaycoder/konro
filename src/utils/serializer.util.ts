@@ -1,6 +1,6 @@
 import { KonroStorageError } from './error.util';
 
-let yaml: { parse: (str: string) => unknown; stringify: (obj: any, options?: any) => string; } | undefined;
+let yaml: { load: (str: string) => unknown; dump: (obj: any, options?: any) => string; } | undefined;
 try {
   // Lazily attempt to load optional dependency
   yaml = require('js-yaml');
@@ -26,8 +26,8 @@ export const getSerializer = (format: 'json' | 'yaml'): Serializer => {
   }
 
   return {
-    // The cast from `unknown` is necessary as `yaml.parse` is correctly typed to return `unknown`.
-    parse: <T>(data: string): T => yaml.parse(data) as T,
-    stringify: (obj: any): string => yaml.stringify(obj),
+    // The cast from `unknown` is necessary as `yaml.load` is correctly typed to return `unknown`.
+    parse: <T>(data: string): T => yaml.load(data) as T,
+    stringify: (obj: any): string => yaml.dump(obj),
   };
 };

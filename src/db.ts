@@ -31,11 +31,11 @@ interface ChainedQueryBuilder<T> {
   with(relations: WithArgument<T>): this;
   limit(count: number): this;
   offset(count: number): this;
-  all(): Promise<T[]>;
-  first(): Promise<T | null>;
+  all(): T[];
+  first(): T | null;
   aggregate<TAggs extends Record<string, AggregationDefinition>>(
     aggregations: TAggs
-  ): Promise<{ [K in keyof TAggs]: number | null }>;
+  ): { [K in keyof TAggs]: number | null };
 }
 
 interface QueryBuilder<S extends KonroSchema<any, any>> {
@@ -44,12 +44,12 @@ interface QueryBuilder<S extends KonroSchema<any, any>> {
 
 interface UpdateBuilder<S extends KonroSchema<any, any>, T> {
   set(data: Partial<T>): {
-    where(predicate: Partial<T> | ((record: T) => boolean)): Promise<[DatabaseState<S>, T[]]>;
+    where(predicate: Partial<T> | ((record: T) => boolean)): [DatabaseState<S>, T[]];
   };
 }
 
 interface DeleteBuilder<S extends KonroSchema<any, any>, T> {
-  where(predicate: Partial<T> | ((record: T) => boolean)): Promise<[DatabaseState<S>, T[]]>;
+  where(predicate: Partial<T> | ((record: T) => boolean)): [DatabaseState<S>, T[]];
 }
 
 export interface DbContext<S extends KonroSchema<any, any>> {
@@ -115,9 +115,9 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
             descriptor.offset = count;
             return builder;
           },
-          all: async (): Promise<S['types'][T][]> => _queryImpl(state as DatabaseState, schema, descriptor) as unknown as S['types'][T][],
-          first: async (): Promise<S['types'][T] | null> => (_queryImpl(state as DatabaseState, schema, { ...descriptor, limit: 1 })[0] ?? null) as unknown as S['types'][T] | null,
-          aggregate: async <TAggs extends Record<string, AggregationDefinition>>(aggregations: TAggs): Promise<{ [K in keyof TAggs]: number | null }> => {
+          all: (): S['types'][T][] => _queryImpl(state as DatabaseState, schema, descriptor) as unknown as S['types'][T][],
+          first: (): S['types'][T] | null => (_queryImpl(state as DatabaseState, schema, { ...descriptor, limit: 1 })[0] ?? null) as unknown as S['types'][T] | null,
+          aggregate: <TAggs extends Record<string, AggregationDefinition>>(aggregations: TAggs): { [K in keyof TAggs]: number | null } => {
             const aggDescriptor: AggregationDescriptor = { ...descriptor, aggregations };
             return _aggregateImpl(state as DatabaseState, schema, aggDescriptor) as { [K in keyof TAggs]: number | null };
           },
@@ -128,7 +128,7 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
 
     update: <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): UpdateBuilder<S, S['types'][T]> => ({
       set: (data) => ({
-        where: async (predicate) => {
+        where: (predicate) => {
           const [newState, updatedRecords] = _updateImpl(state as DatabaseState, schema, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate as (record: KRecord) => boolean));
           return [newState as DatabaseState<S>, updatedRecords as S['types'][T][]];
         },
@@ -136,7 +136,7 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
     }),
 
     delete: <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): DeleteBuilder<S, S['types'][T]> => ({
-      where: async (predicate) => {
+      where: (predicate) => {
         const [newState, deletedRecords] = _deleteImpl(state as DatabaseState, tableName as string, normalizePredicate(predicate as (record: KRecord) => boolean));
         return [newState as DatabaseState<S>, deletedRecords as S['types'][T][]];
       },

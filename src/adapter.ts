@@ -6,6 +6,7 @@ import { KonroSchema } from './schema';
 import { getSerializer } from './utils/serializer.util';
 import { readFile, writeAtomic } from './utils/fs.util';
 import { TEMP_FILE_SUFFIX } from './utils/constants';
+import { KonroStorageError } from './utils/error.util';
 
 export interface StorageAdapter {
   read<S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>>;
@@ -26,7 +27,12 @@ export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter =
   const readSingle = async <S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>> => {
     const filepath = options.single!.filepath;
     const data = await readFile(filepath);
-    return data ? serializer.parse<DatabaseState<S>>(data) : createEmptyState(schema);
+    if (!data) return createEmptyState(schema);
+    try {
+      return serializer.parse<DatabaseState<S>>(data);
+    } catch (e: any) {
+      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${options.format} file. Original error: ${e.message}`);
+    }
   };
 
   const writeSingle = async (state: DatabaseState<any>): Promise<void> => {
@@ -43,8 +49,12 @@ export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter =
       const filepath = path.join(dir, `${tableName}${fileExtension}`);
       const data = await readFile(filepath);
       if (data) {
-        // This is a controlled cast, safe because we are iterating over the schema's tables.
-        (state as any)[tableName] = serializer.parse(data);
+        try {
+          // This is a controlled cast, safe because we are iterating over the schema's tables.
+          (state as any)[tableName] = serializer.parse(data);
+        } catch (e: any) {
+          throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${options.format} file. Original error: ${e.message}`);
+        }
       }
     }
     return state;

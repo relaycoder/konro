@@ -30,8 +30,8 @@ describe('E2E > MultiFileYaml > FullLifecycle', () => {
     expect(yaml.load(usersFileContent)).toEqual({ records: [], meta: { lastId: 0 } });
 
     // 2. Insert data and write to disk
-    const [s1, user] = db.insert(state, 'users', { name: 'E2E Yaml', email: 'yaml.e2e@test.com', age: 50 });
-    const [s2] = db.insert(s1, 'posts', { title: 'YAML Post', content: '...', authorId: user.id });
+    const [s1, user] = db.insert(state, 'users', { name: 'E2E Yaml', email: 'yaml.e2e@test.com', age: 50, isActive: true });
+    const [s2] = db.insert(s1, 'posts', { title: 'YAML Post', content: '...', authorId: user.id, publishedAt: new Date() });
     await db.write(s2);
 
     // 3. Read back and verify integrity from separate files
@@ -43,8 +43,11 @@ describe('E2E > MultiFileYaml > FullLifecycle', () => {
     // 4. Query with relations
     const userWithPosts = await db.query(readState).from('users').where({ id: user.id }).with({ posts: true }).first();
     expect(userWithPosts).toBeDefined();
-    expect(userWithPosts!.posts.length).toBe(1);
-    expect(userWithPosts!.posts[0]?.title).toBe('YAML Post');
+    if (userWithPosts) {
+      expect(userWithPosts.posts).toBeDefined();
+      expect(userWithPosts.posts?.length).toBe(1);
+      expect(userWithPosts.posts?.[0]?.title).toBe('YAML Post');
+    }
 
     // 5. Update and write
     const [s3] = await db.update(readState, 'users').set({ name: 'Updated Yaml User' }).where({ id: user.id });

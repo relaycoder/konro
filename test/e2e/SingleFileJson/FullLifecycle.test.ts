@@ -31,11 +31,13 @@ describe('E2E > SingleFileJson > FullLifecycle', () => {
       name: 'E2E User',
       email: 'e2e@test.com',
       age: 42,
+      isActive: true,
     });
     const [s2, post] = db.insert(s1, 'posts', {
       title: 'E2E Post',
       content: 'Live from the disk',
       authorId: user.id,
+      publishedAt: new Date(),
     });
     await db.write(s2);
 
@@ -53,8 +55,11 @@ describe('E2E > SingleFileJson > FullLifecycle', () => {
       .first();
 
     expect(userWithPosts).toBeDefined();
-    expect(userWithPosts!.posts.length).toBe(1);
-    expect(userWithPosts!.posts[0]?.title).toBe('E2E Post');
+    if (userWithPosts) {
+      expect(userWithPosts.posts).toBeDefined();
+      expect(userWithPosts.posts?.length).toBe(1);
+      expect(userWithPosts.posts?.[0]?.title).toBe('E2E Post');
+    }
 
     // 5. Update a record, write the change, and read back to confirm
     const [s3, updatedPosts] = await db.update(readState, 'posts')

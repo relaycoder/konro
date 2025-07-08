@@ -2,12 +2,12 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import { konro } from '../../../src/index';
 import { testSchema } from '../../util';
 import path from 'path';
-import type { Database } from '../../../src/db';
+import type { DbContext } from '../../../src/db';
 import type { DatabaseState } from '../../../src/types';
 
 describe('Integration > InMemoryFlow > CrudCycle', () => {
-  let db: Database<typeof testSchema>;
-  let state: DatabaseState;
+  let db: DbContext<typeof testSchema>;
+  let state: DatabaseState<typeof testSchema>;
 
   beforeEach(() => {
     // Adapter is needed for context creation, but we won't use its I/O
@@ -27,6 +27,7 @@ describe('Integration > InMemoryFlow > CrudCycle', () => {
       name: 'InMemory Alice',
       email: 'alice@inmemory.com',
       age: 30,
+      isActive: true,
     });
     expect(insertedUser.id).toBe(1);
 
@@ -41,6 +42,7 @@ describe('Integration > InMemoryFlow > CrudCycle', () => {
       name: 'Chain User',
       email: 'chain@test.com',
       age: 40,
+      isActive: true,
     });
 
     // Insert post using the new state
@@ -48,6 +50,7 @@ describe('Integration > InMemoryFlow > CrudCycle', () => {
       title: 'Chained Post',
       content: '...',
       authorId: user.id,
+      publishedAt: new Date(),
     });
 
     expect(stateAfterPostInsert.users.records.length).toBe(1);
@@ -60,6 +63,7 @@ describe('Integration > InMemoryFlow > CrudCycle', () => {
       name: 'Update Me',
       email: 'update@test.com',
       age: 50,
+      isActive: true,
     });
 
     const [stateAfterUpdate, updatedUsers] = db.update(stateAfterInsert, 'users')
@@ -79,6 +83,7 @@ describe('Integration > InMemoryFlow > CrudCycle', () => {
       name: 'Delete Me',
       email: 'delete@test.com',
       age: 60,
+      isActive: true,
     });
 
     const [stateAfterDelete, deletedUsers] = db.delete(stateAfterInsert, 'users')
@@ -96,10 +101,11 @@ describe('Integration > InMemoryFlow > CrudCycle', () => {
       name: 'Relation User',
       email: 'relation@test.com',
       age: 35,
+      isActive: true,
     });
     const [s2, ] = db.insert(s1, 'posts', [
-        { title: 'Relational Post 1', content: '...', authorId: user.id },
-        { title: 'Relational Post 2', content: '...', authorId: user.id },
+        { title: 'Relational Post 1', content: '...', authorId: user.id, publishedAt: new Date() },
+        { title: 'Relational Post 2', content: '...', authorId: user.id, publishedAt: new Date() },
     ]);
 
     const userWithPosts = db.query(s2).from('users').where({ id: user.id }).with({ posts: true }).first();
@@ -107,7 +113,7 @@ describe('Integration > InMemoryFlow > CrudCycle', () => {
     expect(userWithPosts).toBeDefined();
     expect(userWithPosts?.name).toBe('Relation User');
     expect(userWithPosts?.posts).toBeInstanceOf(Array);
-    expect(userWithPosts?.posts.length).toBe(2);
-    expect(userWithPosts?.posts[0]?.title).toBe('Relational Post 1');
+    expect(userWithPosts?.posts?.length).toBe(2);
+    expect(userWithPosts?.posts?.[0]?.title).toBe('Relational Post 1');
   });
 });

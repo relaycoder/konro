@@ -71,13 +71,9 @@ type IdKey<TTableDef extends Record<string, ColumnDefinition<any>>> = {
 
 // Find keys for columns with defaults
 type WithDefaultKey<TTableDef extends Record<string, ColumnDefinition<any>>> = {
-  [K in keyof TTableDef]: TTableDef[K]['options'] extends { default: any } ? K
-    : TTableDef[K]['options'] extends { default: () => any } ? K 
-    : TTableDef[K]['options'] extends ColumnOptions<any> 
-      ? 'default' extends keyof TTableDef[K]['options'] 
-        ? TTableDef[K]['options']['default'] extends undefined ? never : K
-        : never
-      : never;
+    [K in keyof TTableDef]: TTableDef[K] extends { options: { default: any } }
+        ? K
+        : never;
 }[keyof TTableDef];
 
 type CreateModel<TTableDef extends Record<string, ColumnDefinition<any>>> = Pretty<
@@ -120,7 +116,7 @@ export interface KonroSchema<
 
 // --- SCHEMA HELPERS ---
 
-export const id = (): ColumnDefinition<number> => ({ _type: 'column', dataType: 'id', options: { unique: true }, _tsType: 0 });
+export const id = (): ColumnDefinition<number> => ({ _type: 'column', dataType: 'id', options: { unique: true, default: () => 0 }, _tsType: 0 });
 export const string = (options?: StringColumnOptions): StringColumnDefinition => ({ _type: 'column', dataType: 'string', options, _tsType: '' });
 export const number = (options?: NumberColumnOptions): NumberColumnDefinition => ({ _type: 'column', dataType: 'number', options, _tsType: 0 });
 export const boolean = (options?: ColumnOptions<boolean>): ColumnDefinition<boolean> => ({ _type: 'column', dataType: 'boolean', options, _tsType: false });

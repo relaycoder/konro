@@ -1,8 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
 import { konro } from '../../../src/index';
-import { testSchema, TEST_DIR, cleanup, ensureTestDir, UserCreate } from '../../util';
+import { testSchema, TEST_DIR, cleanup, ensureTestDir } from '../../util';
 import path from 'path';
-import type { DatabaseState } from '../../../src/types';
 
 describe('E2E > ErrorAndEdgeCases > Pagination', () => {
   const dbFilePath = path.join(TEST_DIR, 'pagination_test.json');
@@ -17,13 +16,14 @@ describe('E2E > ErrorAndEdgeCases > Pagination', () => {
 
     beforeEach(async () => {
         await ensureTestDir();
-        let state: DatabaseState = db.createEmptyState();
-        const usersToInsert: UserCreate[] = [];
+        let state = db.createEmptyState();
+        const usersToInsert = [];
         for (let i = 1; i <= 100; i++) {
             usersToInsert.push({
                 name: `User ${i}`,
                 email: `user${i}@test.com`,
                 age: 20 + (i % 30),
+                isActive: true
             });
         }
         [state] = db.insert(state, 'users', usersToInsert);

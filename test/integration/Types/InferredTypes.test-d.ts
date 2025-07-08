@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import { konro } from '../../../src/index';
-import { schemaDef, UserCreate } from '../../util';
+import { schemaDef } from '../../util';
 
 /**
  * NOTE: This is a type definition test file.
@@ -13,7 +13,6 @@ describe('Integration > Types > InferredTypes', () => {
   it('should pass type checks', () => {
     const testSchema = konro.createSchema(schemaDef);
     type User = typeof testSchema.types.users;
-    type Post = typeof testSchema.types.posts;
 
     // Test 1: Inferred User type should have correct primitive and relational fields.
     const user: User = {
@@ -34,8 +33,6 @@ describe('Integration > Types > InferredTypes', () => {
 
         // This should be valid
         user.name; // Accessing for type check
-        // Use posts type but avoid unused variable error
-        const hasUserPosts = user.posts !== undefined;
     const db = konro.createDatabase({ schema: testSchema, adapter: {} as any });
     const state = db.createEmptyState();
 

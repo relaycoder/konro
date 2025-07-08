@@ -26,7 +26,7 @@ describe('E2E > ErrorAndEdgeCases > Transaction', () => {
     it('should not write to disk if an operation fails mid-transaction', async () => {
         // 1. Get initial state with one user
         let state = await db.read();
-        [state] = db.insert(state, 'users', { name: 'Good User', email: 'good@test.com', age: 30 });
+        [state] = db.insert(state, 'users', { name: 'Good User', email: 'good@test.com', age: 30, isActive: true });
         await db.write(state);
 
     const contentBefore = await fs.readFile(dbFilePath, 'utf-8');
@@ -35,11 +35,11 @@ describe('E2E > ErrorAndEdgeCases > Transaction', () => {
     let transactionState = await db.read();
 
         // This one is fine
-        [transactionState] = db.insert(transactionState, 'users', { name: 'Another User', email: 'another@test.com', age: 31 });
+        [transactionState] = db.insert(transactionState, 'users', { name: 'Another User', email: 'another@test.com', age: 31, isActive: true });
 
         // This one will fail due to unique constraint
         const failingOperation = () => {
-            db.insert(transactionState, 'users', { name: 'Bad User', email: 'good@test.com', age: 32 });
+            db.insert(transactionState, 'users', { name: 'Bad User', email: 'good@test.com', age: 32, isActive: true });
         };
         expect(failingOperation).toThrow(KonroValidationError);
 
@@ -51,7 +51,7 @@ describe('E2E > ErrorAndEdgeCases > Transaction', () => {
 
     it('should not change the database file if an update matches no records', async () => {
         let state = await db.read();
-        [state] = db.insert(state, 'users', { name: 'Initial User', email: 'initial@test.com', age: 50 });
+        [state] = db.insert(state, 'users', { name: 'Initial User', email: 'initial@test.com', age: 50, isActive: true });
         await db.write(state);
 
     const contentBefore = await fs.readFile(dbFilePath, 'utf-8');

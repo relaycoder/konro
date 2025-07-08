@@ -39,7 +39,7 @@ describe('Integration > Adapters > SingleFileJson', () => {
     expect(parsedContent.users.meta.lastId).toBe(1);
     expect(parsedContent.posts.records.length).toBe(0);
   });
-  
+
   it('should correctly serialize complex data types like dates', async () => {
     let state = db.createEmptyState();
     const testDate = new Date('2023-10-27T10:00:00.000Z');
@@ -51,12 +51,12 @@ describe('Integration > Adapters > SingleFileJson', () => {
       // override default
       publishedAt: testDate,
     });
-    
+
     await db.write(state);
 
     const fileContent = await fs.readFile(dbFilePath, 'utf-8');
     const parsedContent = JSON.parse(fileContent);
-    
+
     expect(parsedContent.posts.records[0].publishedAt).toBe(testDate.toISOString());
   });
 });

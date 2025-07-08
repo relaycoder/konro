@@ -37,13 +37,23 @@ export interface NumberColumnDefinition extends ColumnDefinition<number> {
   options?: NumberColumnOptions;
 }
 
-export interface RelationDefinition {
+export interface OneRelationDefinition {
   _type: 'relation';
-  relationType: 'one' | 'many';
+  relationType: 'one';
   targetTable: string;
   on: string;
   references: string;
 }
+
+export interface ManyRelationDefinition {
+  _type: 'relation';
+  relationType: 'many';
+  targetTable: string;
+  on: string;
+  references: string;
+}
+
+export type RelationDefinition = OneRelationDefinition | ManyRelationDefinition;
 
 export interface AggregationDefinition {
   _type: 'aggregation';
@@ -53,19 +63,18 @@ export interface AggregationDefinition {
 
 // --- TYPE INFERENCE MAGIC ---
 
-// Find keys for ID columns
 type IdKey<TTableDef extends Record<string, ColumnDefinition<any>>> = {
-    [K in keyof TTableDef]: TTableDef[K]['dataType'] extends 'id' ? K : never;
+  [K in keyof TTableDef]: TTableDef[K]['dataType'] extends 'id' ? K : never;
 }[keyof TTableDef];
 
 // Find keys for columns with defaults
 type WithDefaultKey<TTableDef extends Record<string, ColumnDefinition<any>>> = {
-    [K in keyof TTableDef]: TTableDef[K]['options'] extends { default: any } ? K : never;
+  [K in keyof TTableDef]: TTableDef[K]['options'] extends { default: any } ? K : never;
 }[keyof TTableDef];
 
 type CreateModel<TTableDef extends Record<string, ColumnDefinition<any>>> = Pretty<
-    // Fields with defaults are optional
-    Partial<{ [K in WithDefaultKey<TTableDef>]: TTableDef[K]['_tsType'] }> &
+  // Fields with defaults are optional
+  Partial<{ [K in WithDefaultKey<TTableDef>]: TTableDef[K]['_tsType'] }> &
     // All other fields, except the ID and defaults, are required
     { [K in Exclude<keyof TTableDef, IdKey<TTableDef> | WithDefaultKey<TTableDef>>]: TTableDef[K]['_tsType'] }
 >;
@@ -81,15 +90,15 @@ type CreateModels<TTables extends Record<string, Record<string, ColumnDefinition
 };
 
 type WithRelations<
-  TBaseModels extends Record<string, any>,
+  TBaseModels extends BaseModels<any>,
   TRelations extends Record<string, Record<string, RelationDefinition>>
 > = {
-    [TableName in keyof TBaseModels]: TBaseModels[TableName] & (TableName extends keyof TRelations ? {
+  [TableName in keyof TBaseModels]: TBaseModels[TableName] & (TableName extends keyof TRelations ? {
       [RelationName in keyof TRelations[TableName]]?: TRelations[TableName][RelationName]['relationType'] extends 'one'
-      ? TBaseModels[TRelations[TableName][RelationName]['targetTable']] | null
-      : TBaseModels[TRelations[TableName][RelationName]['targetTable']][];
+        ? TBaseModels[TRelations[TableName][RelationName]['targetTable']] | null
+        : TBaseModels[TRelations[TableName][RelationName]['targetTable']][];
     } : {});
-  };
+};
 
 export interface KonroSchema<
   TTables extends Record<string, Record<string, ColumnDefinition<any>>>,
@@ -108,10 +117,10 @@ export const string = (options?: StringColumnOptions): StringColumnDefinition =>
 export const number = (options?: NumberColumnOptions): NumberColumnDefinition => ({ _type: 'column', dataType: 'number', options, _tsType: 0 });
 export const boolean = (options?: ColumnOptions<boolean>): ColumnDefinition<boolean> => ({ _type: 'column', dataType: 'boolean', options, _tsType: false });
 export const date = (options?: ColumnOptions<Date>): ColumnDefinition<Date> => ({ _type: 'column', dataType: 'date', options, _tsType: new Date() });
-export const object = <T extends Record<string, any>>(options?: ColumnOptions<T>): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options, _tsType: undefined! });
+export const object = <T extends Record<string, any>>(options?: ColumnOptions<T>): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options, _tsType: undefined as any });
 
-export const one = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'one', targetTable, ...options });
-export const many = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({ _type: 'relation', relationType: 'many', targetTable, ...options });
+export const one = (targetTable: string, options: { on: string; references: string }): OneRelationDefinition => ({ _type: 'relation', relationType: 'one', targetTable, ...options });
+export const many = (targetTable: string, options: { on: string; references: string }): ManyRelationDefinition => ({ _type: 'relation', relationType: 'many', targetTable, ...options });
 
 
 // --- AGGREGATION HELPERS ---

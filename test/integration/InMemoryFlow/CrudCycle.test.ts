@@ -83,7 +83,7 @@ describe('Integration > InMemoryFlow > CrudCycle', () => {
 
     const [stateAfterDelete, deletedUsers] = db.delete(stateAfterInsert, 'users')
       .where({ id: user.id });
-    
+
     expect(deletedUsers.length).toBe(1);
     expect(deletedUsers[0]?.name).toBe('Delete Me');
 
@@ -102,7 +102,7 @@ describe('Integration > InMemoryFlow > CrudCycle', () => {
         { title: 'Relational Post 2', content: '...', authorId: user.id },
     ]);
 
-    const userWithPosts = db.query(s2).from('users').where({id: user.id}).with({posts: true}).first();
+    const userWithPosts = db.query(s2).from('users').where({ id: user.id }).with({ posts: true }).first();
 
     expect(userWithPosts).toBeDefined();
     expect(userWithPosts?.name).toBe('Relation User');

@@ -51,25 +51,25 @@ describe('E2E > SingleFileJson > FullLifecycle', () => {
       .where({ id: user.id })
       .with({ posts: true })
       .first();
-    
+
     expect(userWithPosts).toBeDefined();
     expect(userWithPosts!.posts.length).toBe(1);
     expect(userWithPosts!.posts[0]?.title).toBe('E2E Post');
 
     // 5. Update a record, write the change, and read back to confirm
     const [s3, updatedPosts] = await db.update(readState, 'posts')
-        .set({ title: 'Updated E2E Post' })
-        .where({ id: post.id });
+      .set({ title: 'Updated E2E Post' })
+      .where({ id: post.id });
     expect(updatedPosts.length).toBe(1);
     await db.write(s3);
-    
+
     let stateAfterUpdate = await db.read();
     const updatedPostFromDisk = await db.query(stateAfterUpdate).from('posts').where({ id: post.id }).first();
     expect(updatedPostFromDisk?.title).toBe('Updated E2E Post');
 
     // 6. Delete a record, write, and confirm it's gone
     const [s4, deletedUsers] = await db.delete(stateAfterUpdate, 'users')
-        .where({ id: user.id });
+      .where({ id: user.id });
     expect(deletedUsers.length).toBe(1);
     await db.write(s4);
 

@@ -23,7 +23,7 @@ describe('E2E > MultiFileYaml > FullLifecycle', () => {
     // 1. Initialize empty database files
     let state = db.createEmptyState();
     await db.write(state);
-    
+
     // Check that empty files are created
     const usersFilePath = path.join(dbDirPath, 'users.yaml');
     let usersFileContent = await fs.readFile(usersFilePath, 'utf-8');

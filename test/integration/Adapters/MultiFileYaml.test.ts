@@ -67,11 +67,11 @@ describe('Integration > Adapters > MultiFileYaml', () => {
       authorId: 1,
       publishedAt: testDate,
     });
-    
+
     await db.write(state);
-    
+
     const readState = await db.read();
-    
+
     expect(readState.posts.records[0]?.publishedAt).toBeInstanceOf(Date);
     expect((readState.posts.records[0]?.publishedAt as Date).getTime()).toBe(testDate.getTime());
   });

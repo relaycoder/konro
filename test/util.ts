@@ -52,8 +52,8 @@ export const schemaDef = {
       user: konro.one('users', { on: 'userId', references: 'id' }),
     },
     posts_tags: {
-        post: konro.one('posts', { on: 'postId', references: 'id' }),
-        tag: konro.one('tags', { on: 'tagId', references: 'id' }),
+      post: konro.one('posts', { on: 'postId', references: 'id' }),
+      tag: konro.one('tags', { on: 'tagId', references: 'id' }),
     }
   }),
 };
@@ -65,15 +65,15 @@ export type UserCreate = typeof testSchema.create.users;
 // --- Test Utilities ---
 
 export const cleanup = async () => {
-    try {
-        await fs.rm(TEST_DIR, { recursive: true, force: true });
-    } catch (error: any) {
-        if (error.code !== 'ENOENT') {
-            console.error('Error during cleanup:', error);
-        }
+  try {
+    await fs.rm(TEST_DIR, { recursive: true, force: true });
+  } catch (error: any) {
+    if (error.code !== 'ENOENT') {
+      console.error('Error during cleanup:', error);
     }
+  }
 };
 
 export const ensureTestDir = async () => {
-    await fs.mkdir(TEST_DIR, { recursive: true });
+  await fs.mkdir(TEST_DIR, { recursive: true });
 }

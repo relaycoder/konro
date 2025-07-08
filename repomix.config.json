@@ -25,13 +25,11 @@
   "include": [
     "package.json",
     "tsconfig.json",
-    "src",
-    // "src/index.ts",
-    "README.md",
-    // "test/integration/InMemoryFlow/CrudCycle.test.ts",
-    "test"
-    // "test/unit",
-    // "src/utils"
+    "src/db.ts",
+    "src/operations.ts", 
+    "src/schema.ts",
+    "test/unit/Core/Query-With.test.ts",
+    "README.md"
   ],
   "ignore": {
     "useGitignore": true,

@@ -14,26 +14,47 @@ const normalizePredicate = <T extends KRecord>(
 
 // --- TYPE HELPERS for Fluent API ---
 
-type RelatedModel<T> = T extends (infer R)[] ? R : T extends (infer R | null) ? R : never;
+type RelatedModel<T> = T extends (infer R)[] ? R : T extends (infer R | null) ? R : T;
 
 // TAll is the full relational model type, e.g. schema.types.users
-type WithArgument<TAll> = {
-  // K is a relation name like 'posts' or 'profile'
-  [K in keyof TAll as NonNullable<TAll[K]> extends any[] | object ? K : never]?: boolean | {
+type WithArgument<TAll> = { // e.g. TAll = S['types']['users']
+  [K in keyof TAll as NonNullable<TAll[K]> extends any[] | object ? K : never]?: boolean | ({
     where?: (record: RelatedModel<NonNullable<TAll[K]>>) => boolean;
-    select?: Record<string, ColumnDefinition<unknown>>;
-  };
+  } & (
+    | { select: Record<string, ColumnDefinition<unknown>>; with?: never }
+    | { select?: never; with?: WithArgument<RelatedModel<NonNullable<TAll[K]>>> }
+  ));
 };
 
 type ResolveWith<
   S extends KonroSchema<any, any>,
   TName extends keyof S['tables'],
   TWith extends WithArgument<S['types'][TName]>
-> = {
-  // K will be 'posts', 'profile', etc.
-  [K in keyof TWith as K extends keyof S['types'][TName] ? K : never]: S['types'][TName][K];
+> = { // TName='users', TWith={posts: {with: {author: true}}}
+    [K in keyof TWith & keyof S['relations'][TName]]:
+        S['relations'][TName][K] extends { relationType: 'many' }
+            ? ( // 'many' relation -> array result. K = 'posts'
+                TWith[K] extends { select: infer TSelect }
+                    ? ({ [P in keyof TSelect]: InferColumnType<TSelect[P]> })[]
+                    : TWith[K] extends { with: infer TNestedWith }
+                        // S['relations']['users']['posts']['targetTable'] = 'posts'
+                        ? (S['base'][S['relations'][TName][K]['targetTable']] & ResolveWith<S, S['relations'][TName][K]['targetTable'], TNestedWith & WithArgument<S['types'][S['relations'][TName][K]['targetTable']]>>)[]
+                        // posts: true.
+                        : S['base'][S['relations'][TName][K]['targetTable']][]
+              )
+            : S['relations'][TName][K] extends { relationType: 'one' }
+                ? ( // 'one' relation -> nullable object result
+                    TWith[K] extends { select: infer TSelect }
+                        ? ({ [P in keyof TSelect]: InferColumnType<TSelect[P]> }) | null
+                        : TWith[K] extends { with: infer TNestedWith }
+                            ? (S['base'][S['relations'][TName][K]['targetTable']] & ResolveWith<S, S['relations'][TName][K]['targetTable'], TNestedWith & WithArgument<S['types'][S['relations'][TName][K]['targetTable']]>>) | null
+                            : S['base'][S['relations'][TName][K]['targetTable']] | null
+                  )
+                : never
 };
 
+// InferColumnType is not exported from schema, so we need it here too.
+type InferColumnType<C> = C extends ColumnDefinition<infer T> ? T : never;
 
 // --- TYPE-SAFE FLUENT API BUILDERS ---
 

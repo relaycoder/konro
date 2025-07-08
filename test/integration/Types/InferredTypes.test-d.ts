@@ -71,5 +71,7 @@ describe('Integration > Types > InferredTypes', () => {
     // Test 6: A query with .with() should return the relations, which are now accessible.
     const userWithPosts = db.query(state).from('users').where({ id: 1 }).with({ posts: true }).first();
     userWithPosts?.posts; // This should be valid and typed as Post[] | undefined
+    
+    // userWithPosts?.posts?.[0]?.author; 
   });
 });

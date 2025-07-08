@@ -1,3 +1,11 @@
+Based on the description of the changes you've made to improve the type safety of eager loading, I will update the `README.md` to reflect these enhancements. The main changes will be:
+
+1.  I'll update the "Core Principles" section to highlight the new precision of the type inference for relational queries.
+2.  I'll add a new "Advanced Queries with `.with()`" subsection to explain how to use nested filters, selections, and eager-loading, and I'll clarify the mutual exclusivity of `select` and nested `with` clauses.
+
+This will provide users with a clear understanding of the query builder's advanced capabilities and its improved type safety.
+
+```typescript // README.md
 # Konro: The Type-Safe, Functional ORM for JSON/YAML
 
 <p align="center">
@@ -38,6 +46,7 @@ Konro is a new kind of "micro-ORM" for JavaScript and TypeScript. It offers the 
 8.  [**Pillar III: Cooking (The Fluent API)**](#8-pillar-iii-cooking-the-fluent-api)
     *   [The Transactional Workflow: Read, Mutate, Write](#the-transactional-workflow-read-mutate-write)
     *   [Reading Data with `db.query()`](#reading-data-with-dbquery)
+    *   [Advanced Queries with `.with()`](#advanced-queries-with-with)
     *   [Inserting Data with `db.insert()`](#inserting-data-with-dbinsert)
     *   [Updating Data with `db.update()`](#updating-data-with-dbupdate)
     *   [Deleting Data with `db.delete()`](#deleting-data-with-dbdelete)
@@ -65,7 +74,7 @@ Konro is inspired by the art of Indonesian cooking, where a rich soup or `Konro`
 *   **Type-First, Not Schema-First:** You don't write a schema to get types. You write a schema *as* types. Your schema definition becomes your single source of truth for both runtime validation and static TypeScript types.
 *   **Stateless Core, Stateful Feel:** The internal engine is a collection of pure, stateless functions (`(state, args) => newState`). The user-facing API is a fluent, chainable "query builder" that feels intuitive and stateful, giving you the best of both worlds.
 *   **Immutable by Default:** Data is never mutated. Every `insert`, `update`, or `delete` operation is an explicit API call that returns a `[newState, result]` tuple. This eliminates side effects and makes state management predictable and safe.
-*   **Relational at Heart:** Define `one-to-one`, `one-to-many`, and `many-to-one` relationships directly in your schema. Eager-load related data with a simple and fully-typed `.with()` clause.
+*   **Relational at Heart:** Define `one-to-one`, `one-to-many`, and `many-to-one` relationships directly in your schema. Eager-load related data with a powerful and fully-typed `.with()` clause, where TypeScript precisely infers the shape of the result based on your query's structure.
 
 ## 3. When to Use Konro (and When Not To)
 
@@ -309,6 +318,90 @@ const results = await db.query(state)
 const single = await db.query(state).from('users').where({ id: 1 }).first(); // Returns Promise<T | null>
 ```
 
+### Advanced Queries with `.with()`
+
+The `.with()` clause is not just for loading direct relations. It's a powerful tool for building complex, nested queries in a type-safe way. Konro's type inference engine precisely understands your `.with()` clause and constructs an exact return type, so you can't accidentally access data you didn't ask for.
+
+**1. Filtering Related Records**
+
+You can provide a `where` clause to filter the records returned by a relation.
+
+```typescript
+const userWithSpecificPosts = await db.query(state)
+  .from('users')
+  .where({ id: 1 })
+  .with({
+    posts: {
+      where: (post) => post.title.includes('Special')
+    }
+  })
+  .first();
+
+// The type of `userWithSpecificPosts.posts` is `Post[]`,
+// but it will only contain posts whose title includes 'Special'.
+```
+
+**2. Selecting Specific Fields from Relations**
+
+To save memory or simplify your result object, you can use `select` to pick specific columns from a related table.
+
+```typescript
+const userWithPostTitles = await db.query(state)
+  .from('users')
+  .where({ id: 1 })
+  .with({
+    posts: {
+      select: {
+        postTitle: blogSchema.tables.posts.title,
+        isPublished: blogSchema.tables.posts.published
+      }
+    }
+  })
+  .first();
+
+// The type of `userWithPostTitles.posts` is now:
+// { postTitle: string; isPublished: boolean; }[]
+// It's fully typed, and you can't access `post.id` for example.
+```
+
+**3. Nested Eager-Loading**
+
+You can nest `.with()` clauses to load relations of relations. For example, you can query for posts, and for each post, load its `author`, and for that `author`, load all of *their* `posts`.
+
+```typescript
+const postsWithDeepAuthors = await db.query(state)
+  .from('posts')
+  .with({
+    author: { // `author` is a 'one' relation on posts
+      with: { // from the author (a user), load their 'many' posts relation
+        posts: true 
+      }
+    }
+  })
+  .all();
+
+// TypeScript knows that `postsWithDeepAuthors[0].author.posts` is `Post[]`.
+```
+
+**4. `select` and nested `with` are Mutually Exclusive**
+
+Within a relation's option object, you can either use `select` to shape the output or `with` to load deeper relations, but not both. This design choice keeps query intent clear and predictable.
+
+```typescript
+// VALID: Select fields from the author
+.with({ author: { select: { name: blogSchema.tables.users.name } } })
+
+// VALID: Load the author's other posts
+.with({ author: { with: { posts: true } } })
+
+// INVALID: This will cause a TypeScript error.
+.with({ author: {
+    select: { name: blogSchema.tables.users.name },
+    with: { posts: true }
+  }
+})
+```
+
 ### Aggregating Data with `db.query()`
 
 The same query chain can be used to perform calculations like `count`, `sum`, `avg`, `min`, and `max`.
@@ -434,3 +527,4 @@ Konro is a community-driven project. Contributions are warmly welcome. Whether i
 ## 13. License
 
 [MIT](./LICENSE) © [Your Name]
+```

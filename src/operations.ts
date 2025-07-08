@@ -17,11 +17,18 @@ export const createEmptyState = <S extends KonroSchema<any, any>>(schema: S): Da
 
 // --- QUERY ---
 
+interface WithOptions {
+  select?: Record<string, ColumnDefinition<unknown>>;
+  where?: (record: KRecord) => boolean;
+  with?: WithClause;
+}
+type WithClause = Record<string, boolean | WithOptions>;
+
 export interface QueryDescriptor {
   tableName: string;
   select?: Record<string, ColumnDefinition<unknown> | RelationDefinition>;
   where?: (record: KRecord) => boolean;
-  with?: Record<string, boolean | { select?: Record<string, ColumnDefinition<unknown>>; where?: (record: KRecord) => boolean }>;
+  with?: WithClause;
   limit?: number;
   offset?: number;
 }
@@ -29,6 +36,78 @@ export interface QueryDescriptor {
 export interface AggregationDescriptor extends QueryDescriptor {
   aggregations: Record<string, AggregationDefinition>;
 }
+
+const _processWith = <S extends KonroSchema<any, any>>(
+  recordsToProcess: KRecord[],
+  currentTableName: string,
+  withClause: WithClause,
+  schema: S,
+  state: DatabaseState
+): KRecord[] => {
+  // structuredClone is important to avoid mutating the records from the previous recursion level or the main state.
+  const resultsWithRelations = structuredClone(recordsToProcess);
+
+  for (const record of resultsWithRelations) {
+    for (const relationName in withClause) {
+      const relationDef = schema.relations[currentTableName]?.[relationName];
+      if (!relationDef) continue;
+
+      const withOpts = withClause[relationName];
+      // Skip if the value is `false` or something not truthy (though types should prevent this)
+      if (!withOpts) continue;
+
+      const relatedRecords = findRelatedRecords(state, record, relationDef);
+
+      const nestedWhere = typeof withOpts === 'object' ? withOpts.where : undefined;
+      const nestedSelect = typeof withOpts === 'object' ? withOpts.select : undefined;
+      const nestedWith = typeof withOpts === 'object' ? withOpts.with : undefined;
+
+      let processedRelatedRecords = nestedWhere ? relatedRecords.filter(nestedWhere) : [...relatedRecords];
+
+      // Recursively process deeper relations first
+      if (nestedWith && processedRelatedRecords.length > 0) {
+        processedRelatedRecords = _processWith(
+          processedRelatedRecords,
+          relationDef.targetTable,
+          nestedWith,
+          schema,
+          state
+        );
+      }
+
+      // Then, apply select on the (potentially already processed) related records
+      if (nestedSelect) {
+        const targetTableSchema = schema.tables[relationDef.targetTable];
+        if (!targetTableSchema) throw KonroError(`Schema for table "${relationDef.targetTable}" not found.`);
+
+        processedRelatedRecords = processedRelatedRecords.map(rec => {
+          const newRec: KRecord = {};
+          for (const outputKey in nestedSelect) {
+            const def = nestedSelect[outputKey];
+            if (!def) continue;
+            // nested with() does not support selecting relations, only columns, as per spec.
+            if (def._type === 'column') {
+              const colName = Object.keys(targetTableSchema).find(key => targetTableSchema[key] === def);
+              if (colName && rec.hasOwnProperty(colName)) {
+                newRec[outputKey] = rec[colName];
+              }
+            }
+          }
+          return newRec;
+        });
+      }
+
+      // Finally, attach the results to the parent record
+      if (relationDef.relationType === 'one') {
+        record[relationName] = processedRelatedRecords[0] ?? null;
+      } else {
+        record[relationName] = processedRelatedRecords;
+      }
+    }
+  }
+
+  return resultsWithRelations;
+};
 
 export const _queryImpl = <S extends KonroSchema<any, any>>(state: DatabaseState, schema: S, descriptor: QueryDescriptor): KRecord[] => {
   const tableState = state[descriptor.tableName];
@@ -39,47 +118,7 @@ export const _queryImpl = <S extends KonroSchema<any, any>>(state: DatabaseState
 
   // 2. Eager load relations (`with`)
   if (descriptor.with) {
-    results = structuredClone(results); // Clone to avoid mutating state
-    for (const record of results) {
-      for (const relationName in descriptor.with) {
-        const relationDef = schema.relations[descriptor.tableName]?.[relationName];
-        if (!relationDef) continue;
-
-        const relatedRecords = findRelatedRecords(state, record, relationDef);
-
-        const withOpts = descriptor.with[relationName];
-        const nestedWhere = typeof withOpts === 'object' ? withOpts.where : undefined;
-        const nestedSelect = typeof withOpts === 'object' ? withOpts.select : undefined;
-
-        let processedRecords = nestedWhere ? relatedRecords.filter(nestedWhere) : relatedRecords;
-
-        if (nestedSelect) {
-          const targetTableSchema = schema.tables[relationDef.targetTable];
-          if (!targetTableSchema) throw KonroError(`Schema for table "${relationDef.targetTable}" not found.`);
-
-          processedRecords = processedRecords.map(rec => {
-            const newRec: KRecord = {};
-            for (const outputKey in nestedSelect) {
-              const def = nestedSelect[outputKey];
-              if (!def) continue;
-              // nested with() does not support selecting relations, only columns, as per spec.
-              if (def._type === 'column') {
-                const colName = Object.keys(targetTableSchema).find(key => targetTableSchema[key] === def);
-                if (colName && rec.hasOwnProperty(colName)) {
-                  newRec[outputKey] = rec[colName];
-                }
-              }
-            }
-            return newRec;
-          });
-        }
-        if (relationDef.relationType === 'one') {
-          record[relationName] = processedRecords[0] ?? null;
-        } else {
-          record[relationName] = processedRecords;
-        }
-      }
-    }
+    results = _processWith(results, descriptor.tableName, descriptor.with, schema, state);
   }
 
   // 3. Paginate

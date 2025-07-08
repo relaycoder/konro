@@ -153,4 +153,34 @@ describe('Unit > Core > Query-With', () => {
         expect(user.posts).toBeInstanceOf(Array);
         expect((user.posts as unknown[]).length).toBe(0);
     });
+
+    it('should handle nested `with` clauses for deep relations', () => {
+        const results = _queryImpl(testState, testSchema, {
+            tableName: 'posts',
+            where: r => r.id === 10, // Alice Post 1
+            with: {
+                author: { // author is a user
+                    with: {
+                        posts: { // author's other posts
+                            where: p => p.id === 12 // Filter to Alice Post 2
+                        }
+                    }
+                }
+            }
+        });
+
+        expect(results.length).toBe(1);
+        const post = results[0]!;
+        expect(post.id).toBe(10);
+
+        const author = post.author as { id: unknown, name: unknown, posts: { id: unknown }[] };
+        expect(author).toBeDefined();
+        expect(author.id).toBe(1);
+        expect(author.name).toBe('Alice');
+
+        const authorPosts = author.posts;
+        expect(authorPosts).toBeInstanceOf(Array);
+        expect(authorPosts.length).toBe(1);
+        expect(authorPosts[0]!.id).toBe(12);
+    });
 });

@@ -87,7 +87,7 @@ Konro is inspired by the art of Indonesian cooking, where a rich soup or `Konro`
 ## 4. Installation
 
 ```bash
-npm install konro-db
+npm install konro
 # If using YAML files, you will also need to install `js-yaml`
 # npm install js-yaml
 ```
@@ -102,7 +102,7 @@ Let's build a simple, relational blog database from scratch.
 Create a single source of truth for your entire database structure. Konro will infer your TypeScript types from this object.
 
 ```typescript
-import { konro } from 'konro-db';
+import { konro } from 'konro';
 
 export const blogSchema = konro.createSchema({
   tables: {
@@ -137,7 +137,7 @@ export type Post = typeof blogSchema.types.posts;
 Create a database context that is pre-configured with your schema and a storage adapter.
 
 ```typescript
-import { konro, createFileAdapter } from 'konro-db';
+import { konro, createFileAdapter } from 'konro';
 import { blogSchema } from './schema';
 
 // Example: Use a multi-file YAML adapter to create 'users.yaml' and 'posts.yaml'.

@@ -85,7 +85,11 @@ export interface KonroSchema<
 > {
   tables: TTables;
   relations: TRelations;
+  /** The full, relational types for each table model. */
   types: Models<TTables, TRelations, BaseModels<TTables>>;
+  /** The base types for each table model, without any relations. */
+  base: BaseModels<TTables>;
+  /** The types for creating new records, with defaults and `id` made optional. */
   create: CreateModels<TTables, BaseModels<TTables>>;
 }
 
@@ -146,6 +150,7 @@ export const createSchema = <
     relations: relations as any, // Cast to bypass complex conditional type issue
     // Types are applied via the return type annotation, these are just placeholders at runtime.
     types: null as any,
+    base: {} as any,
     create: {} as any,
   };
 };

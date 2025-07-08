@@ -60,5 +60,16 @@ describe('Integration > Types > InferredTypes', () => {
 
     // @ts-expect-error - 'nonExistentRelation' is not a valid relation on 'users'
     db.query(state).from('users').with({ nonExistentRelation: true });
+
+    // Test 5: A query without .with() should return the base type, without relations.
+    const baseUser = db.query(state).from('users').where({ id: 1 }).first();
+    // This should be valid
+    baseUser?.name;
+    // @ts-expect-error - 'posts' does not exist on base user type, as .with() was not used.
+    baseUser?.posts;
+
+    // Test 6: A query with .with() should return the relations, which are now accessible.
+    const userWithPosts = db.query(state).from('users').where({ id: 1 }).with({ posts: true }).first();
+    userWithPosts?.posts; // This should be valid and typed as Post[] | undefined
   });
 });

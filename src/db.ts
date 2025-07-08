@@ -16,40 +16,52 @@ const normalizePredicate = <T extends KRecord>(
 
 type RelatedModel<T> = T extends (infer R)[] ? R : T extends (infer R | null) ? R : never;
 
-type WithArgument<T> = {
-  [K in keyof T as NonNullable<T[K]> extends any[] | object ? K : never]?: boolean | {
-    where?: (record: RelatedModel<NonNullable<T[K]>>) => boolean;
-    select?: Record<string, ColumnDefinition<unknown>>; // Not fully typed yet, but better than nothing
+// TAll is the full relational model type, e.g. schema.types.users
+type WithArgument<TAll> = {
+  // K is a relation name like 'posts' or 'profile'
+  [K in keyof TAll as NonNullable<TAll[K]> extends any[] | object ? K : never]?: boolean | {
+    where?: (record: RelatedModel<NonNullable<TAll[K]>>) => boolean;
+    select?: Record<string, ColumnDefinition<unknown>>;
   };
 };
 
+type ResolveWith<
+  S extends KonroSchema<any, any>,
+  TName extends keyof S['tables'],
+  TWith extends WithArgument<S['types'][TName]>
+> = {
+  // K will be 'posts', 'profile', etc.
+  [K in keyof TWith as K extends keyof S['types'][TName] ? K : never]: S['types'][TName][K];
+};
+
+
 // --- TYPE-SAFE FLUENT API BUILDERS ---
 
-interface ChainedQueryBuilder<T> {
+interface ChainedQueryBuilder<S extends KonroSchema<any, any>, TName extends keyof S['tables'], TReturn> {
   select(fields: Record<string, ColumnDefinition<unknown> | RelationDefinition>): this;
-  where(predicate: Partial<T> | ((record: T) => boolean)): this;
-  with(relations: WithArgument<T>): this;
+  where(predicate: Partial<S['base'][TName]> | ((record: S['base'][TName]) => boolean)): this;
+  with<W extends WithArgument<S['types'][TName]>>(relations: W): ChainedQueryBuilder<S, TName, TReturn & ResolveWith<S, TName, W>>;
   limit(count: number): this;
   offset(count: number): this;
-  all(): T[];
-  first(): T | null;
+  all(): TReturn[];
+  first(): TReturn | null;
   aggregate<TAggs extends Record<string, AggregationDefinition>>(
     aggregations: TAggs
   ): { [K in keyof TAggs]: number | null };
 }
 
 interface QueryBuilder<S extends KonroSchema<any, any>> {
-  from<T extends keyof S['tables']>(tableName: T): ChainedQueryBuilder<S['types'][T]>;
+  from<T extends keyof S['tables']>(tableName: T): ChainedQueryBuilder<S, T, S['base'][T]>;
 }
 
-interface UpdateBuilder<S extends KonroSchema<any, any>, T> {
-  set(data: Partial<T>): {
-    where(predicate: Partial<T> | ((record: T) => boolean)): [DatabaseState<S>, T[]];
+interface UpdateBuilder<S extends KonroSchema<any, any>, TBase> {
+  set(data: Partial<TBase>): {
+    where(predicate: Partial<TBase> | ((record: TBase) => boolean)): [DatabaseState<S>, TBase[]];
   };
 }
 
-interface DeleteBuilder<S extends KonroSchema<any, any>, T> {
-  where(predicate: Partial<T> | ((record: T) => boolean)): [DatabaseState<S>, T[]];
+interface DeleteBuilder<S extends KonroSchema<any, any>, TBase> {
+  where(predicate: Partial<TBase> | ((record: TBase) => boolean)): [DatabaseState<S>, TBase[]];
 }
 
 export interface DbContext<S extends KonroSchema<any, any>> {
@@ -60,10 +72,10 @@ export interface DbContext<S extends KonroSchema<any, any>> {
   createEmptyState(): DatabaseState<S>;
 
   query(state: DatabaseState<S>): QueryBuilder<S>;
-  insert<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T, values: S['create'][T]): [DatabaseState<S>, S['types'][T]];
-  insert<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T, values: Readonly<S['create'][T]>[]): [DatabaseState<S>, S['types'][T][]];
-  update<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): UpdateBuilder<S, S['types'][T]>;
-  delete<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): DeleteBuilder<S, S['types'][T]>;
+  insert<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T, values: S['create'][T]): [DatabaseState<S>, S['base'][T]];
+  insert<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T, values: Readonly<S['create'][T]>[]): [DatabaseState<S>, S['base'][T][]];
+  update<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): UpdateBuilder<S, S['base'][T]>;
+  delete<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): DeleteBuilder<S, S['base'][T]>;
 }
 
 export const createDatabase = <S extends KonroSchema<any, any>>(options: { schema: S, adapter: StorageAdapter }): DbContext<S> => {
@@ -80,65 +92,59 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
       state: DatabaseState<S>,
       tableName: T,
       values: S['create'][T] | Readonly<S['create'][T]>[]
-    ): [DatabaseState<S>, S['types'][T] | S['types'][T][]] => {
+    ): [DatabaseState<S>, S['base'][T] | S['base'][T][]] => {
       const valsArray = Array.isArray(values) ? values : [values];
       const [newState, inserted] = _insertImpl(state as DatabaseState, schema, tableName as string, valsArray as KRecord[]);
       const result = Array.isArray(values) ? inserted : inserted[0];
-      return [newState as DatabaseState<S>, result] as [DatabaseState<S>, S['types'][T] | S['types'][T][]];
+      return [newState as DatabaseState<S>, result] as [DatabaseState<S>, S['base'][T] | S['base'][T][]];
     }) as {
-      <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T, values: S['create'][T]): [DatabaseState<S>, S['types'][T]];
-      <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T, values: Readonly<S['create'][T]>[]): [DatabaseState<S>, S['types'][T][]];
+      <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T, values: S['create'][T]): [DatabaseState<S>, S['base'][T]];
+      <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T, values: Readonly<S['create'][T]>[]): [DatabaseState<S>, S['base'][T][]];
     },
 
     query: (state: DatabaseState<S>): QueryBuilder<S> => ({
-      from: <T extends keyof S['tables']>(tableName: T): ChainedQueryBuilder<S['types'][T]> => {
-        const descriptor: QueryDescriptor = { tableName: tableName as string };
-
-        const builder: ChainedQueryBuilder<S['types'][T]> = {
-          select: (fields) => {
-            descriptor.select = fields;
-            return builder;
+      from: <TName extends keyof S['tables']>(tableName: TName): ChainedQueryBuilder<S, TName, S['base'][TName]> => {
+        const createBuilder = <TReturn>(currentDescriptor: QueryDescriptor): ChainedQueryBuilder<S, TName, TReturn> => ({
+          select(fields) {
+            return createBuilder<TReturn>({ ...currentDescriptor, select: fields });
           },
-          where: (predicate) => {
-            descriptor.where = normalizePredicate(predicate as (record: KRecord) => boolean);
-            return builder;
+          where(predicate) {
+            return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate as (record: KRecord) => boolean) });
           },
-          with: (relations) => {
-            descriptor.with = relations as QueryDescriptor['with'];
-            return builder;
+          with<W extends WithArgument<S['types'][TName]>>(relations: W) {
+            const newWith = { ...currentDescriptor.with, ...(relations as QueryDescriptor['with']) };
+            return createBuilder<TReturn & ResolveWith<S, TName, W>>({ ...currentDescriptor, with: newWith });
           },
-          limit: (count) => {
-            descriptor.limit = count;
-            return builder;
+          limit(count) {
+            return createBuilder<TReturn>({ ...currentDescriptor, limit: count });
           },
-          offset: (count) => {
-            descriptor.offset = count;
-            return builder;
+          offset(count) {
+            return createBuilder<TReturn>({ ...currentDescriptor, offset: count });
           },
-          all: (): S['types'][T][] => _queryImpl(state as DatabaseState, schema, descriptor) as unknown as S['types'][T][],
-          first: (): S['types'][T] | null => (_queryImpl(state as DatabaseState, schema, { ...descriptor, limit: 1 })[0] ?? null) as unknown as S['types'][T] | null,
+          all: (): TReturn[] => _queryImpl(state as DatabaseState, schema, currentDescriptor) as unknown as TReturn[],
+          first: (): TReturn | null => (_queryImpl(state as DatabaseState, schema, { ...currentDescriptor, limit: 1 })[0] ?? null) as unknown as TReturn | null,
           aggregate: <TAggs extends Record<string, AggregationDefinition>>(aggregations: TAggs): { [K in keyof TAggs]: number | null } => {
-            const aggDescriptor: AggregationDescriptor = { ...descriptor, aggregations };
+            const aggDescriptor: AggregationDescriptor = { ...currentDescriptor, aggregations };
             return _aggregateImpl(state as DatabaseState, schema, aggDescriptor) as { [K in keyof TAggs]: number | null };
           },
-        };
-        return builder;
+        });
+        return createBuilder<S['base'][TName]>({ tableName: tableName as string });
       },
     }),
 
-    update: <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): UpdateBuilder<S, S['types'][T]> => ({
+    update: <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): UpdateBuilder<S, S['base'][T]> => ({
       set: (data) => ({
         where: (predicate) => {
           const [newState, updatedRecords] = _updateImpl(state as DatabaseState, schema, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate as (record: KRecord) => boolean));
-          return [newState as DatabaseState<S>, updatedRecords as S['types'][T][]];
+          return [newState as DatabaseState<S>, updatedRecords as S['base'][T][]];
         },
       }),
     }),
 
-    delete: <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): DeleteBuilder<S, S['types'][T]> => ({
+    delete: <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): DeleteBuilder<S, S['base'][T]> => ({
       where: (predicate) => {
         const [newState, deletedRecords] = _deleteImpl(state as DatabaseState, tableName as string, normalizePredicate(predicate as (record: KRecord) => boolean));
-        return [newState as DatabaseState<S>, deletedRecords as S['types'][T][]];
+        return [newState as DatabaseState<S>, deletedRecords as S['base'][T][]];
       },
     }),
   };

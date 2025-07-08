@@ -94,7 +94,7 @@ export interface ColumnDefinition<T> {
   readonly _type: 'column';
   readonly dataType: 'id' | 'string' | 'number' | 'boolean' | 'date' | 'object';
   readonly options: any;
-  readonly _tsType: T; // Phantom type, does not exist at runtime
+  readonly _tsType?: T; // Phantom type, does not exist at runtime
 }
 
 /** The definition for a table relationship, created by `konro.one()` or `konro.many()`. */
@@ -171,7 +171,7 @@ export const boolean = (options?: { default?: boolean | (() => boolean) }) => cr
 /** A date column, stored as an ISO string but hydrated as a Date object. */
 export const date = (options?: { default?: Date | (() => Date) }) => createColumn<Date>('date', options, new Date());
 /** A column for storing arbitrary JSON objects, with a generic for type safety. */
-export const object = <T extends Record<string, any>>(options?: { default?: T | (() => T) }): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options, _tsType: undefined as T });
+export const object = <T extends Record<string, any>>(options?: { default?: T | (() => T) }): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options });
 
 
 // --- RELATIONSHIP DEFINITION HELPERS ---

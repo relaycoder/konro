@@ -195,9 +195,11 @@ export const _aggregateImpl = <S extends KonroSchema<any, any>>(
 // --- INSERT ---
 
 export const _insertImpl = <S extends KonroSchema<any, any>>(state: DatabaseState, schema: S, tableName: string, values: KRecord[]): [DatabaseState, KRecord[]] => {
-  const newState = structuredClone(state);
-  const tableState = newState[tableName];
-  if (!tableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
+  const oldTableState = state[tableName];
+  if (!oldTableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
+
+  // To maintain immutability, we deep-clone only the table being modified.
+  const tableState = structuredClone(oldTableState);
   const tableSchema = schema.tables[tableName];
   if (!tableSchema) throw KonroError(`Schema for table "${tableName}" not found.`);
   const insertedRecords: KRecord[] = [];
@@ -223,15 +225,15 @@ export const _insertImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
     insertedRecords.push(newRecord);
   }
 
+  const newState = { ...state, [tableName]: tableState };
   return [newState, insertedRecords];
 };
 
 // --- UPDATE ---
 
 export const _updateImpl = <S extends KonroSchema<any, any>>(state: DatabaseState, schema: S, tableName: string, data: Partial<KRecord>, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
-  const newState = structuredClone(state);
-  const tableState = newState[tableName];
-  if (!tableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
+  const oldTableState = state[tableName];
+  if (!oldTableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
 
   const tableSchema = schema.tables[tableName];
   if (!tableSchema) {
@@ -249,12 +251,12 @@ export const _updateImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
     delete updateData[idColumn];
   }
 
-  tableState.records = tableState.records.map(record => {
+  const newRecords = oldTableState.records.map(record => {
     if (predicate(record)) {
       const updatedRecord = { ...record, ...updateData };
 
       // Validate the updated record, excluding current record from unique checks
-      const otherRecords = tableState.records.filter(r => r !== record);
+      const otherRecords = oldTableState.records.filter(r => r !== record);
       validateRecord(updatedRecord, tableSchema, otherRecords);
 
       updatedRecords.push(updatedRecord);
@@ -263,6 +265,13 @@ export const _updateImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
     return record;
   });
 
+  if (updatedRecords.length === 0) {
+    return [state, []];
+  }
+
+  const tableState = { ...oldTableState, records: newRecords };
+  const newState = { ...state, [tableName]: tableState };
+
   return [newState, updatedRecords];
 };
 
@@ -270,12 +279,11 @@ export const _updateImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
 // --- DELETE ---
 
 export const _deleteImpl = (state: DatabaseState, tableName: string, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
-  const newState = structuredClone(state);
-  const tableState = newState[tableName];
-  if (!tableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
+  const oldTableState = state[tableName];
+  if (!oldTableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
   const deletedRecords: KRecord[] = [];
 
-  const keptRecords = tableState.records.filter(record => {
+  const keptRecords = oldTableState.records.filter(record => {
     if (predicate(record)) {
       deletedRecords.push(record);
       return false;
@@ -283,7 +291,12 @@ export const _deleteImpl = (state: DatabaseState, tableName: string, predicate: 
     return true;
   });
 
-  tableState.records = keptRecords;
+  if (deletedRecords.length === 0) {
+    return [state, []];
+  }
+
+  const tableState = { ...oldTableState, records: keptRecords };
+  const newState = { ...state, [tableName]: tableState };
   return [newState, deletedRecords];
 };
 

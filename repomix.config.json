@@ -23,15 +23,16 @@
     }
   },
   "include": [
-    "package.json",
-    "tsconfig.json",
-    "src",
-    // "src/index.ts",
-    "README.md",
+    // "package.json",
+    // "tsconfig.json",
+    // "src",
+    // // "src/index.ts",
+    // "README.md",
     // "test/integration/InMemoryFlow/CrudCycle.test.ts",
     // "test"
-    "test/unit",
-    "src/utils"
+    // "test/unit",
+    // "src/utils"
+    "test/unit/Core/Update.test.ts"
   ],
   "ignore": {
     "useGitignore": true,

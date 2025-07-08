@@ -74,7 +74,8 @@ describe('Unit > Core > Update', () => {
         const [newState, updated] = _updateImpl(testState, testSchema, 'users', { age: 99 }, (r) => r.id === 999);
         expect(updated.length).toBe(0);
         expect(newState.users!.records).toEqual(testState.users!.records);
-        expect(newState).not.toBe(testState);
+        // For a no-op, the original state object should be returned for performance.
+        expect(newState).toBe(testState);
     });
 
     it('should return both the new state and an array of the full, updated records in the result tuple', () => {

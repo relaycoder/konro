@@ -37,23 +37,25 @@ export interface NumberColumnDefinition extends ColumnDefinition<number> {
   options?: NumberColumnOptions;
 }
 
-export interface OneRelationDefinition {
+export interface OneRelationDefinition<TTableName extends string = string> {
   _type: 'relation';
   relationType: 'one';
-  targetTable: string;
+  targetTable: TTableName;
   on: string;
   references: string;
 }
 
-export interface ManyRelationDefinition {
+export interface ManyRelationDefinition<TTableName extends string = string> {
   _type: 'relation';
   relationType: 'many';
-  targetTable: string;
+  targetTable: TTableName;
   on: string;
   references: string;
 }
 
-export type RelationDefinition = OneRelationDefinition | ManyRelationDefinition;
+export type RelationDefinition<TTableName extends string = string> =
+  | OneRelationDefinition<TTableName>
+  | ManyRelationDefinition<TTableName>;
 
 export interface AggregationDefinition {
   _type: 'aggregation';
@@ -75,7 +77,7 @@ type WithDefaultKey<TTableDef extends Record<string, ColumnDefinition<any>>> = {
 type CreateModel<TTableDef extends Record<string, ColumnDefinition<any>>> = Pretty<
   // Fields with defaults are optional
   Partial<{ [K in WithDefaultKey<TTableDef>]: TTableDef[K]['_tsType'] }> &
-    // All other fields, except the ID and defaults, are required
+    // All other fields, except the ID, are required for creation
     { [K in Exclude<keyof TTableDef, IdKey<TTableDef> | WithDefaultKey<TTableDef>>]: TTableDef[K]['_tsType'] }
 >;
 
@@ -91,7 +93,7 @@ type CreateModels<TTables extends Record<string, Record<string, ColumnDefinition
 
 type WithRelations<
   TBaseModels extends BaseModels<any>,
-  TRelations extends Record<string, Record<string, RelationDefinition>>
+  TRelations extends Record<string, Record<string, RelationDefinition<keyof TBaseModels & string>>>
 > = {
   [TableName in keyof TBaseModels]: TBaseModels[TableName] & (TableName extends keyof TRelations ? {
       [RelationName in keyof TRelations[TableName]]?: TRelations[TableName][RelationName]['relationType'] extends 'one'
@@ -102,7 +104,7 @@ type WithRelations<
 
 export interface KonroSchema<
   TTables extends Record<string, Record<string, ColumnDefinition<any>>>,
-  TRelations extends Record<string, Record<string, RelationDefinition>>
+  TRelations extends Record<string, Record<string, RelationDefinition<keyof TTables & string>>>
 > {
   tables: TTables;
   relations: TRelations;
@@ -119,8 +121,8 @@ export const boolean = (options?: ColumnOptions<boolean>): ColumnDefinition<bool
 export const date = (options?: ColumnOptions<Date>): ColumnDefinition<Date> => ({ _type: 'column', dataType: 'date', options, _tsType: new Date() });
 export const object = <T extends Record<string, any>>(options?: ColumnOptions<T>): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options, _tsType: undefined as any });
 
-export const one = (targetTable: string, options: { on: string; references: string }): OneRelationDefinition => ({ _type: 'relation', relationType: 'one', targetTable, ...options });
-export const many = (targetTable: string, options: { on: string; references: string }): ManyRelationDefinition => ({ _type: 'relation', relationType: 'many', targetTable, ...options });
+export const one = <T extends string>(targetTable: T, options: { on: string; references: string }): OneRelationDefinition<T> => ({ _type: 'relation', relationType: 'one', targetTable, ...options });
+export const many = <T extends string>(targetTable: T, options: { on: string; references: string }): ManyRelationDefinition<T> => ({ _type: 'relation', relationType: 'many', targetTable, ...options });
 
 
 // --- AGGREGATION HELPERS ---
@@ -134,7 +136,7 @@ export const max = (column: string): AggregationDefinition => ({ _type: 'aggrega
 
 type SchemaInputDef<T> = {
   tables: T;
-  relations?: (tables: T) => Record<string, Record<string, RelationDefinition>>;
+  relations?: (tables: T) => Record<string, Record<string, RelationDefinition<keyof T & string>>>;
 };
 
 export function createSchema<const TDef extends SchemaInputDef<any>>(definition: TDef) {

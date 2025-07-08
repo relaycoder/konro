@@ -27,7 +27,7 @@
     "tsconfig.json",
     "src",
     // "src/index.ts",
-    "README.md",
+    // "README.md",
     // "test/integration/InMemoryFlow/CrudCycle.test.ts",
     "test"
   ],
@@ -36,6 +36,7 @@
     "useDefaultPatterns": true,
     "customPatterns": [
       "test/unit",
+      "src/utils"
       // "src/utils"
     ]
   },

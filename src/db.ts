@@ -17,7 +17,7 @@ const normalizePredicate = <T extends KRecord>(
 type RelatedModel<T> = T extends (infer R)[] ? R : T extends (infer R | null) ? R : never;
 
 type WithArgument<T> = {
-  [K in keyof T as NonNullable<T[K]> extends any[] | (any | null) ? K : never]?: boolean | {
+  [K in keyof T as NonNullable<T[K]> extends any[] | object ? K : never]?: boolean | {
     where?: (record: RelatedModel<NonNullable<T[K]>>) => boolean;
     select?: Record<string, ColumnDefinition<unknown>>; // Not fully typed yet, but better than nothing
   };

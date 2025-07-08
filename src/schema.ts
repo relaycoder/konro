@@ -45,8 +45,13 @@ type Models<
 };
 
 /** Finds all column names in a table definition that are optional for insertion (i.e., `id` or has a `default`). */
+/** Finds all column names in a table definition that are optional for insertion (i.e., `id` or has a `default`). */
 type OptionalCreateKeys<TTableDef> = {
-  [K in keyof TTableDef]: TTableDef[K] extends ({ options: { default: any } } | { dataType: 'id' }) ? K : never;
+  [K in keyof TTableDef]: TTableDef[K] extends { dataType: 'id' }
+    ? K
+    : TTableDef[K] extends { options: { default: any } }
+    ? K
+    : never;
 }[keyof TTableDef];
 
 /**
@@ -88,7 +93,7 @@ export interface KonroSchema<
 export interface ColumnDefinition<T> {
   readonly _type: 'column';
   readonly dataType: 'id' | 'string' | 'number' | 'boolean' | 'date' | 'object';
-  readonly options?: any;
+  readonly options: any;
   readonly _tsType: T; // Phantom type, does not exist at runtime
 }
 
@@ -151,7 +156,7 @@ export const createSchema = <
 const createColumn = <T>(dataType: ColumnDefinition<T>['dataType'], options?: object): ColumnDefinition<T> => ({
   _type: 'column',
   dataType,
-  options,
+  options: options ?? {},
   // This is a "phantom type", it holds the TypeScript type for inference but is undefined at runtime.
   _tsType: undefined as T,
 });

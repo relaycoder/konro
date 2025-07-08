@@ -102,18 +102,18 @@ export interface ColumnDefinition<T> {
 }
 
 /** The definition for a table relationship, created by `konro.one()` or `konro.many()`. */
-interface BaseRelationDefinition {
+export interface BaseRelationDefinition {
   readonly _type: 'relation';
   readonly targetTable: string;
   readonly on: string;
   readonly references: string;
 }
 
-interface OneRelationDefinition extends BaseRelationDefinition {
+export interface OneRelationDefinition extends BaseRelationDefinition {
   readonly relationType: 'one';
 }
 
-interface ManyRelationDefinition extends BaseRelationDefinition {
+export interface ManyRelationDefinition extends BaseRelationDefinition {
   readonly relationType: 'many';
 }
 

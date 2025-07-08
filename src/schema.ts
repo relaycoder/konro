@@ -31,26 +31,22 @@ type Models<
   TRelations extends Record<string, any>,
   TBaseModels extends Record<keyof TTables, any>
 > = {
-  [TableName in keyof TTables]: TBaseModels[TableName] & (TableName extends keyof TRelations
-    ? {
-        [RelationName in keyof TRelations[TableName]]?: TRelations[TableName][RelationName] extends RelationDefinition & {
-          relationType: 'one';
-          targetTable: infer TargetTable extends keyof TTables;
+  [TableName in keyof TTables]: TBaseModels[TableName] &
+    (TableName extends keyof TRelations
+      ? {
+          [RelationName in keyof TRelations[TableName]]?: TRelations[TableName][RelationName] extends OneRelationDefinition
+            ? // `targetTable` is a string literal, so we can use it to index `Models`
+              Models<TTables, TRelations, TBaseModels>[TRelations[TableName][RelationName]['targetTable']] | null
+            : TRelations[TableName][RelationName] extends ManyRelationDefinition
+            ? Models<TTables, TRelations, TBaseModels>[TRelations[TableName][RelationName]['targetTable']][]
+            : never;
         }
-          ? Models<TTables, TRelations, TBaseModels>[TargetTable] | null
-          : TRelations[TableName][RelationName] extends RelationDefinition & {
-              relationType: 'many';
-              targetTable: infer TargetTable extends keyof TTables;
-            }
-          ? Models<TTables, TRelations, TBaseModels>[TargetTable][]
-          : never;
-      }
-    : {});
+      : {});
 };
 
 /** Finds all column names in a table definition that are optional for insertion (i.e., `id` or has a `default`). */
 type OptionalCreateKeys<TTableDef> = {
-  [K in keyof TTableDef]: TTableDef[K] extends ColumnDefinition<any> & ({ options: { default: any } } | { dataType: 'id' }) ? K : never;
+  [K in keyof TTableDef]: TTableDef[K] extends ({ options: { default: any } } | { dataType: 'id' }) ? K : never;
 }[keyof TTableDef];
 
 /**
@@ -97,13 +93,22 @@ export interface ColumnDefinition<T> {
 }
 
 /** The definition for a table relationship, created by `konro.one()` or `konro.many()`. */
-export interface RelationDefinition {
+interface BaseRelationDefinition {
   readonly _type: 'relation';
-  readonly relationType: 'one' | 'many';
   readonly targetTable: string;
   readonly on: string;
   readonly references: string;
 }
+
+interface OneRelationDefinition extends BaseRelationDefinition {
+  readonly relationType: 'one';
+}
+
+interface ManyRelationDefinition extends BaseRelationDefinition {
+  readonly relationType: 'many';
+}
+
+export type RelationDefinition = OneRelationDefinition | ManyRelationDefinition;
 
 /** The definition for a data aggregation, created by `konro.count()`, `konro.sum()`, etc. */
 export interface AggregationDefinition {
@@ -168,7 +173,7 @@ export const object = <T extends Record<string, any>>(options?: { default?: T | 
 // --- RELATIONSHIP DEFINITION HELPERS ---
 
 /** Defines a `one-to-one` or `many-to-one` relationship. */
-export const one = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({
+export const one = (targetTable: string, options: { on: string; references: string }): OneRelationDefinition => ({
   _type: 'relation',
   relationType: 'one',
   targetTable,
@@ -176,7 +181,7 @@ export const one = (targetTable: string, options: { on: string; references: stri
 });
 
 /** Defines a `one-to-many` relationship. */
-export const many = (targetTable: string, options: { on: string; references: string }): RelationDefinition => ({
+export const many = (targetTable: string, options: { on: string; references: string }): ManyRelationDefinition => ({
   _type: 'relation',
   relationType: 'many',
   targetTable,

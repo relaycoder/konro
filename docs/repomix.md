@@ -2215,19 +2215,21 @@ type Models<
   TRelations extends Record<string, any>,
   TBaseModels extends Record<keyof TTables, any>
 > = {
-  [TableName in keyof TTables]: TBaseModels[TableName] & {
-    [RelationName in keyof TRelations[TableName]]?: TRelations[TableName][RelationName] extends RelationDefinition & {
-      relationType: 'one';
-      targetTable: infer TargetTable extends keyof TTables;
-    }
-      ? Models<TTables, TRelations, TBaseModels>[TargetTable] | null
-      : TRelations[TableName][RelationName] extends RelationDefinition & {
-          relationType: 'many';
+  [TableName in keyof TTables]: TBaseModels[TableName] & (TableName extends keyof TRelations
+    ? {
+        [RelationName in keyof TRelations[TableName]]?: TRelations[TableName][RelationName] extends RelationDefinition & {
+          relationType: 'one';
           targetTable: infer TargetTable extends keyof TTables;
         }
-      ? Models<TTables, TRelations, TBaseModels>[TargetTable][]
-      : never;
-  };
+          ? Models<TTables, TRelations, TBaseModels>[TargetTable] | null
+          : TRelations[TableName][RelationName] extends RelationDefinition & {
+              relationType: 'many';
+              targetTable: infer TargetTable extends keyof TTables;
+            }
+          ? Models<TTables, TRelations, TBaseModels>[TargetTable][]
+          : never;
+      }
+    : {});
 };
 
 /** Finds all column names in a table definition that are optional for insertion (i.e., `id` or has a `default`). */
@@ -2244,10 +2246,13 @@ type CreateModels<
   TBaseModels extends Record<keyof TTables, any>
 > = {
   [TableName in keyof TTables]: Omit<
-    // Required fields are the ones not in OptionalCreateKeys
-    Pick<TBaseModels[TableName], Exclude<keyof TBaseModels[TableName], OptionalCreateKeys<TTables[TableName]>>> &
-    // Optional fields are made partial
-    Partial<Pick<TBaseModels[TableName], OptionalCreateKeys<TTables[TableName]>>>,
+    {
+      // Required fields
+      [K in Exclude<keyof TBaseModels[TableName], OptionalCreateKeys<TTables[TableName]>>]: TBaseModels[TableName][K];
+    } & {
+      // Optional fields
+      [K in OptionalCreateKeys<TTables[TableName]>]?: TBaseModels[TableName][K];
+    },
     // 'id' is always omitted from create types
     'id'
   >;

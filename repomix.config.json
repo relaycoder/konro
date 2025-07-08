@@ -26,6 +26,8 @@
     "package.json",
     "tsconfig.json",
     "src",
+    "test/e2e",
+    "test/util.ts",
     "README.md"
   ],
   "ignore": {
@@ -33,7 +35,7 @@
     "useDefaultPatterns": true,
     "customPatterns": [
       // "test/unit",
-      // "src/utils"
+      "src/utils"
       // "src/utils"
     ]
   },

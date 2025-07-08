@@ -75,8 +75,8 @@ interface QueryBuilder<S extends KonroSchema<any, any>> {
   from<T extends keyof S['tables']>(tableName: T): ChainedQueryBuilder<S, T, S['base'][T]>;
 }
 
-interface UpdateBuilder<S extends KonroSchema<any, any>, TBase> {
-  set(data: Partial<TBase>): {
+interface UpdateBuilder<S extends KonroSchema<any, any>, TBase, TCreate> {
+  set(data: Partial<TCreate>): {
     where(predicate: Partial<TBase> | ((record: TBase) => boolean)): [DatabaseState<S>, TBase[]];
   };
 }
@@ -95,7 +95,7 @@ export interface DbContext<S extends KonroSchema<any, any>> {
   query(state: DatabaseState<S>): QueryBuilder<S>;
   insert<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T, values: S['create'][T]): [DatabaseState<S>, S['base'][T]];
   insert<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T, values: Readonly<S['create'][T]>[]): [DatabaseState<S>, S['base'][T][]];
-  update<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): UpdateBuilder<S, S['base'][T]>;
+  update<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): UpdateBuilder<S, S['base'][T], S['create'][T]>;
   delete<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): DeleteBuilder<S, S['base'][T]>;
 }
 
@@ -153,7 +153,7 @@ export const createDatabase = <S extends KonroSchema<any, any>>(options: { schem
       },
     }),
 
-    update: <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): UpdateBuilder<S, S['base'][T]> => ({
+    update: <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): UpdateBuilder<S, S['base'][T], S['create'][T]> => ({
       set: (data) => ({
         where: (predicate) => {
           const [newState, updatedRecords] = _updateImpl(state as DatabaseState, schema, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate as (record: KRecord) => boolean));

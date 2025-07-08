@@ -135,7 +135,7 @@ export interface AggregationDefinition {
 export const createSchema = <
   const TDef extends {
     tables: Record<string, Record<string, ColumnDefinition<any>>>;
-    relations?: (tables: TDef['tables']) => Record<string, Record<string, RelationDefinition>>;
+    relations?: (tables: TDef['tables']) => Record<string, Record<string, BaseRelationDefinition>>;
   }
 >(
   schemaDef: TDef
@@ -178,7 +178,7 @@ export const object = <T extends Record<string, any>>(options?: { default?: T | 
 // --- RELATIONSHIP DEFINITION HELPERS ---
 
 /** Defines a `one-to-one` or `many-to-one` relationship. */
-export const one = (targetTable: string, options: { on: string; references: string }): OneRelationDefinition => ({
+export const one = <T extends string>(targetTable: T, options: { on: string; references: string }): OneRelationDefinition & { targetTable: T } => ({
   _type: 'relation',
   relationType: 'one',
   targetTable,
@@ -186,7 +186,7 @@ export const one = (targetTable: string, options: { on: string; references: stri
 });
 
 /** Defines a `one-to-many` relationship. */
-export const many = (targetTable: string, options: { on: string; references: string }): ManyRelationDefinition => ({
+export const many = <T extends string>(targetTable: T, options: { on: string; references: string }): ManyRelationDefinition & { targetTable: T } => ({
   _type: 'relation',
   relationType: 'many',
   targetTable,

@@ -27,16 +27,18 @@
     "tsconfig.json",
     "src",
     // "src/index.ts",
-    // "README.md",
+    "README.md",
     // "test/integration/InMemoryFlow/CrudCycle.test.ts",
-    "test"
+    // "test"
+    "test/unit",
+    "src/utils"
   ],
   "ignore": {
     "useGitignore": true,
     "useDefaultPatterns": true,
     "customPatterns": [
-      "test/unit",
-      "src/utils"
+      // "test/unit",
+      // "src/utils"
       // "src/utils"
     ]
   },

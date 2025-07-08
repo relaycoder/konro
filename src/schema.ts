@@ -139,13 +139,13 @@ export const createSchema = <
   }
 >(
   schemaDef: TDef
-): KonroSchema<TDef['tables'], TDef['relations'] extends (...args: any) => any ? ReturnType<TDef['relations']> : {}> => {
+): KonroSchema<TDef['tables'], TDef['relations'] extends (...args: any) => any ? ReturnType<TDef['relations']> : {}> => { // eslint-disable-line
   const relations = schemaDef.relations ? schemaDef.relations(schemaDef.tables) : {};
   return {
     tables: schemaDef.tables,
     relations: relations as any, // Cast to bypass complex conditional type issue
     // Types are applied via the return type annotation, these are just placeholders at runtime.
-    types: {} as any,
+    types: null as any,
     create: {} as any,
   };
 };
@@ -153,26 +153,25 @@ export const createSchema = <
 
 // --- COLUMN DEFINITION HELPERS ---
 
-const createColumn = <T>(dataType: ColumnDefinition<T>['dataType'], options?: object): ColumnDefinition<T> => ({
+const createColumn = <T>(dataType: ColumnDefinition<T>['dataType'], options: object | undefined, tsType: T): ColumnDefinition<T> => ({
   _type: 'column',
   dataType,
-  options: options ?? {},
-  // This is a "phantom type", it holds the TypeScript type for inference but is undefined at runtime.
-  _tsType: undefined as T,
+  options,
+  _tsType: tsType,
 });
 
 /** A managed, auto-incrementing integer primary key. */
-export const id = () => createColumn<number>('id');
+export const id = () => createColumn<number>('id', { unique: true }, 0);
 /** A string column with optional validation. */
-export const string = (options?: { unique?: boolean; default?: string | (() => string); min?: number; max?: number; format?: 'email' | 'uuid' | 'url' }) => createColumn<string>('string', options);
+export const string = (options?: { unique?: boolean; default?: string | (() => string); min?: number; max?: number; format?: 'email' | 'uuid' | 'url' }) => createColumn<string>('string', options, '');
 /** A number column with optional validation. */
-export const number = (options?: { unique?: boolean; default?: number | (() => number); min?: number; max?: number; type?: 'integer' }) => createColumn<number>('number', options);
+export const number = (options?: { unique?: boolean; default?: number | (() => number); min?: number; max?: number; type?: 'integer' }) => createColumn<number>('number', options, 0);
 /** A boolean column. */
-export const boolean = (options?: { default?: boolean | (() => boolean) }) => createColumn<boolean>('boolean', options);
+export const boolean = (options?: { default?: boolean | (() => boolean) }) => createColumn<boolean>('boolean', options, false);
 /** A date column, stored as an ISO string but hydrated as a Date object. */
-export const date = (options?: { default?: Date | (() => Date) }) => createColumn<Date>('date', options);
+export const date = (options?: { default?: Date | (() => Date) }) => createColumn<Date>('date', options, new Date());
 /** A column for storing arbitrary JSON objects, with a generic for type safety. */
-export const object = <T extends Record<string, any>>(options?: { default?: T | (() => T) }) => createColumn<T>('object', options);
+export const object = <T extends Record<string, any>>(options?: { default?: T | (() => T) }): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options, _tsType: undefined as T });
 
 
 // --- RELATIONSHIP DEFINITION HELPERS ---

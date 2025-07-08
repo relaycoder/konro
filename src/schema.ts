@@ -71,13 +71,19 @@ type IdKey<TTableDef extends Record<string, ColumnDefinition<any>>> = {
 
 // Find keys for columns with defaults
 type WithDefaultKey<TTableDef extends Record<string, ColumnDefinition<any>>> = {
-  [K in keyof TTableDef]: TTableDef[K]['options'] extends { default: any } ? K : never;
+  [K in keyof TTableDef]: TTableDef[K]['options'] extends { default: any } ? K
+    : TTableDef[K]['options'] extends { default: () => any } ? K 
+    : TTableDef[K]['options'] extends ColumnOptions<any> 
+      ? 'default' extends keyof TTableDef[K]['options'] 
+        ? TTableDef[K]['options']['default'] extends undefined ? never : K
+        : never
+      : never;
 }[keyof TTableDef];
 
 type CreateModel<TTableDef extends Record<string, ColumnDefinition<any>>> = Pretty<
-  // Fields with defaults are optional
-  Partial<{ [K in WithDefaultKey<TTableDef>]: TTableDef[K]['_tsType'] }> &
-    // All other fields, except the ID, are required for creation
+  // Fields with defaults or ID fields are optional
+  Partial<{ [K in IdKey<TTableDef> | WithDefaultKey<TTableDef>]: TTableDef[K]['_tsType'] }> &
+    // All other fields are required for creation
     { [K in Exclude<keyof TTableDef, IdKey<TTableDef> | WithDefaultKey<TTableDef>>]: TTableDef[K]['_tsType'] }
 >;
 

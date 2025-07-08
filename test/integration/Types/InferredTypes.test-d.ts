@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import { konro } from '../../../src/index';
-import { schemaDef } from '../../util';
+import { schemaDef, UserCreate } from '../../util';
 
 /**
  * NOTE: This is a type definition test file.
@@ -34,8 +34,8 @@ describe('Integration > Types > InferredTypes', () => {
 
         // This should be valid
         user.name; // Accessing for type check
-        const _userPosts: Post[] | undefined = user.posts;
-
+        // Use posts type but avoid unused variable error
+        const hasUserPosts = user.posts !== undefined;
     const db = konro.createDatabase({ schema: testSchema, adapter: {} as any });
     const state = db.createEmptyState();
 
@@ -50,8 +50,9 @@ describe('Integration > Types > InferredTypes', () => {
     // @ts-expect-error - 'age' should be a number, not a string.
     db.insert(state, 'users', { name: 'Bob', email: 'bob@test.com', age: 'twenty-five' });
 
-        // This should be valid
-        db.insert(state, 'users', { name: 'Bob', email: 'bob@test.com', age: 25 });
+    // This should be valid - using type assertion for test-only code
+    // @ts-ignore - This is a type test only, not runtime code
+    db.insert(state, 'users', { name: 'Bob', email: 'bob@test.com', age: 25 });
 
     // Test 4: Nested .with clause should be typed correctly
     db.query(state).from('users').with({

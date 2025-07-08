@@ -19,7 +19,7 @@ type RelatedModel<T> = T extends (infer R)[] ? R : T extends (infer R | null) ? 
 type WithArgument<T> = {
   [K in keyof T as NonNullable<T[K]> extends any[] | (any | null) ? K : never]?: boolean | {
     where?: (record: RelatedModel<NonNullable<T[K]>>) => boolean;
-    select?: Record<string, ColumnDefinition<any>>; // Not fully typed yet, but better than nothing
+    select?: Record<string, ColumnDefinition<unknown>>; // Not fully typed yet, but better than nothing
   };
 };
 

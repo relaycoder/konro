@@ -77,10 +77,10 @@ type WithDefaultKey<TTableDef extends Record<string, ColumnDefinition<any>>> = {
 }[keyof TTableDef];
 
 type CreateModel<TTableDef extends Record<string, ColumnDefinition<any>>> = Pretty<
-  // Fields with defaults or ID fields are optional
-  Partial<{ [K in IdKey<TTableDef> | WithDefaultKey<TTableDef>]: TTableDef[K]['_tsType'] }> &
-    // All other fields are required for creation
-    { [K in Exclude<keyof TTableDef, IdKey<TTableDef> | WithDefaultKey<TTableDef>>]: TTableDef[K]['_tsType'] }
+  // Required fields: all fields except ID and fields with defaults
+  { [K in Exclude<keyof TTableDef, IdKey<TTableDef> | WithDefaultKey<TTableDef>>]: TTableDef[K]['_tsType'] } &
+  // Optional fields: ID and fields with defaults
+  Partial<{ [K in WithDefaultKey<TTableDef> | IdKey<TTableDef>]: TTableDef[K]['_tsType'] }>
 >;
 
 export type BaseModels<TTables extends Record<string, Record<string, ColumnDefinition<any>>>> = {
@@ -116,7 +116,15 @@ export interface KonroSchema<
 
 // --- SCHEMA HELPERS ---
 
-export const id = (): ColumnDefinition<number> => ({ _type: 'column', dataType: 'id', options: { unique: true, default: () => 0 }, _tsType: 0 });
+export const id = (): ColumnDefinition<number> => ({
+  _type: 'column',
+  dataType: 'id',
+  options: {
+    unique: true,
+  },
+  _tsType: 0,
+});
+
 export const string = (options?: StringColumnOptions): StringColumnDefinition => ({ _type: 'column', dataType: 'string', options, _tsType: '' });
 export const number = (options?: NumberColumnOptions): NumberColumnDefinition => ({ _type: 'column', dataType: 'number', options, _tsType: 0 });
 export const boolean = (options?: ColumnOptions<boolean>): ColumnDefinition<boolean> => ({ _type: 'column', dataType: 'boolean', options, _tsType: false });
@@ -147,7 +155,7 @@ export function createSchema<const TDef extends SchemaInputDef<any>>(definition:
     tables: definition.tables,
     relations,
     types: null as any, // This is a runtime placeholder for the inferred types
-    create: null as any, // This is a runtime placeholder for the create types
+    create: undefined as any, // This is a runtime placeholder for the create types
   } as KonroSchema<
     TDef['tables'],
     TDef['relations'] extends (...args: any) => any ? ReturnType<TDef['relations']> : {}

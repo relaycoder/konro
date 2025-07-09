@@ -7,6 +7,8 @@ export interface FsProvider {
   writeFile(filepath: string, content: string, encoding: 'utf-8'): Promise<void>;
   rename(oldPath: string, newPath: string): Promise<void>;
   mkdir(dir: string, options: { recursive: true }): Promise<string | undefined>;
+  readdir(dir: string): Promise<string[]>;
+  unlink(filepath: string): Promise<void>;
 }
 
 export const defaultFsProvider: FsProvider = {
@@ -25,6 +27,8 @@ export const defaultFsProvider: FsProvider = {
   },
   rename: fs.rename,
   mkdir: fs.mkdir,
+  readdir: fs.readdir,
+  unlink: fs.unlink,
 };
 
 export const writeAtomic = async (

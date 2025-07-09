@@ -31,9 +31,10 @@ describe('Integration > Types > InferredTypes', () => {
       profile: null,
     };
 
-        // This should be valid
-        user.name; // Accessing for type check
-    const db = konro.createDatabase({ schema: testSchema, adapter: {} as any });
+    // This should be valid
+    user.name; // Accessing for type check
+    const adapter = konro.createFileAdapter({ format: 'json', single: { filepath: 'dummy.json' }});
+    const db = konro.createDatabase({ schema: testSchema, adapter });
     const state = db.createEmptyState();
 
     // Test 2: Should cause a TS error if a non-existent field is used in a where clause.
@@ -52,14 +53,14 @@ describe('Integration > Types > InferredTypes', () => {
     db.insert(state, 'users', { name: 'Bob', email: 'bob@test.com', age: 25 });
 
     // Test 4: Nested .with clause should be typed correctly
-    db.query(state).from('users').with({
+    db.query(state).from('users').with({ // TODO: `query` should not require state in on-demand mode.
       posts: {
         where: (post) => post.title.startsWith('A') // post is typed as Post
       }
     }).first();
 
     // @ts-expect-error - 'nonExistentRelation' is not a valid relation on 'users'
-    db.query(state).from('users').with({ nonExistentRelation: true });
+    db.query(state).from('users').with({ nonExistentRelation: true }); // TODO: `query` should not require state in on-demand mode.
 
     // Test 5: A query without .with() should return the base type, without relations.
     const baseUser = db.query(state).from('users').where({ id: 1 }).first();

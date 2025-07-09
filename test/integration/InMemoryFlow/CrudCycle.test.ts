@@ -2,11 +2,11 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import { konro } from '../../../src/index';
 import { testSchema } from '../../util';
 import path from 'path';
-import type { DbContext } from '../../../src/db';
+import type { InMemoryDbContext } from '../../../src/db';
 import type { DatabaseState } from '../../../src/types';
 
 describe('Integration > InMemoryFlow > CrudCycle', () => {
-  let db: DbContext<typeof testSchema>;
+  let db: InMemoryDbContext<typeof testSchema>;
   let state: DatabaseState<typeof testSchema>;
 
   beforeEach(() => {

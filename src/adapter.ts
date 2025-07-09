@@ -2,27 +2,50 @@ import path from 'path';
 import { DatabaseState } from './types';
 import { createEmptyState } from './operations';
 import { KonroSchema } from './schema';
-import { getSerializer } from './utils/serializer.util';
+import { Serializer, getSerializer } from './utils/serializer.util';
 import { FsProvider, defaultFsProvider, writeAtomic } from './fs';
-import { KonroStorageError } from './utils/error.util';
+import { KonroError, KonroStorageError } from './utils/error.util';
 
 export interface StorageAdapter {
   read<S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>>;
   write(state: DatabaseState<any>): Promise<void>;
+  readonly mode: 'in-memory' | 'on-demand';
 }
 
-type SingleFileStrategy = { single: { filepath: string }; multi?: never; };
-type MultiFileStrategy = { multi: { dir: string }; single?: never; };
+export interface FileStorageAdapter extends StorageAdapter {
+  readonly options: FileAdapterOptions;
+  readonly fs: FsProvider;
+  readonly serializer: Serializer;
+  readonly fileExtension: string;
+}
+
+type SingleFileStrategy = { single: { filepath: string }; multi?: never };
+type MultiFileStrategy = { multi: { dir: string }; single?: never };
 
 export type FileAdapterOptions = {
   format: 'json' | 'yaml';
   fs?: FsProvider;
+  /**
+   * Defines the data access strategy.
+   * - `in-memory`: (Default) Loads the entire database into memory on read. Fast for small/medium datasets.
+   * - `on-demand`: Reads from the file system for each query. Slower but supports larger datasets. Requires the 'multi-file' strategy.
+   */
+  mode?: 'in-memory' | 'on-demand';
 } & (SingleFileStrategy | MultiFileStrategy);
 
-export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter => {
+export function createFileAdapter(options: FileAdapterOptions & { mode: 'on-demand' }): FileStorageAdapter & { mode: 'on-demand' };
+export function createFileAdapter(options: FileAdapterOptions & { mode?: 'in-memory' | undefined }): FileStorageAdapter & { mode: 'in-memory' };
+export function createFileAdapter(options: FileAdapterOptions): FileStorageAdapter;
+export function createFileAdapter(options: FileAdapterOptions): FileStorageAdapter {
   const serializer = getSerializer(options.format);
   const fileExtension = `.${options.format}`;
   const fs = options.fs ?? defaultFsProvider;
+  const mode = options.mode ?? 'in-memory';
+
+  // The 'on-demand' mode is fundamentally incompatible with a single-file approach
+  if (mode === 'on-demand' && options.single) {
+    throw KonroError("The 'on-demand' mode requires the 'multi-file' storage strategy.");
+  }
 
   const readSingle = async <S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>> => {
     const filepath = options.single!.filepath;
@@ -72,9 +95,16 @@ export const createFileAdapter = (options: FileAdapterOptions): StorageAdapter =
     await Promise.all(writes);
   };
 
+  const adapterInternals = {
+    options,
+    fs,
+    serializer,
+    fileExtension,
+    mode,
+  };
+
   if (options.single) {
-    return { read: readSingle, write: writeSingle };
+    return { ...adapterInternals, read: readSingle, write: writeSingle } as FileStorageAdapter;
   } else {
-    return { read: readMulti, write: writeMulti };
-  }
-};
+    return { ...adapterInternals, read: readMulti, write: writeMulti } as FileStorageAdapter;
+  }};

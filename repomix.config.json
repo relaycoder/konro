@@ -26,16 +26,19 @@
     "package.json",
     "tsconfig.json",
     "src",
-    "test/e2e",
+    // "test/e2e",
     "test/util.ts",
-    "README.md"
+    // "README.md"
+    "test/integration/InMemoryFlow",
+    "test/integration/Types"
+
   ],
   "ignore": {
     "useGitignore": true,
     "useDefaultPatterns": true,
     "customPatterns": [
       // "test/unit",
-      "src/utils"
+      // "src/utils"
       // "src/utils"
     ]
   },

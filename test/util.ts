@@ -62,6 +62,15 @@ export const testSchema = konro.createSchema(schemaDef);
 
 export type UserCreate = typeof testSchema.create.users;
 
+export const uuidTestSchema = konro.createSchema({
+  tables: {
+    uuid_users: {
+      id: konro.uuid(),
+      name: konro.string(),
+    },
+  },
+});
+
 // --- Test Utilities ---
 
 export const cleanup = async () => {

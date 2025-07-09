@@ -6,6 +6,7 @@
     "module": "ESNext",
     "moduleDetection": "force",
     "allowJs": true,
+    "allowSyntheticDefaultImports": true,
 
     // Output configuration
     "moduleResolution": "node",

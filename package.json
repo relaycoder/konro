@@ -64,9 +64,12 @@
   },
   "scripts": {
     "lint": "eslint .",
-    "build": "tsc",
-    "dev": "tsc --watch",
+    "build": "tsc --project tsconfig.build.json",
+    "dev": "tsc --watch --project tsconfig.build.json",
     "test": "bun test",
+    "test:restore-importer": "git checkout -- test/konro-test-import.ts",
+    "test:src": "npm run test:restore-importer && bun test",
+    "test:dist": "npm run build && echo \"export * from '../dist/index.js';\" > test/konro-test-import.ts && bun test && npm run test:restore-importer",
     "prepublishOnly": "npm run build"
   }
 }

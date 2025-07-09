@@ -23,7 +23,7 @@ type SingleFileStrategy = { single: { filepath: string }; multi?: never };
 type MultiFileStrategy = { multi: { dir: string }; single?: never };
 
 export type FileAdapterOptions = {
-  format: 'json' | 'yaml';
+  format: 'json' | 'yaml' | 'csv' | 'xlsx';
   fs?: FsProvider;
   /**
    * Defines the data access strategy.
@@ -41,6 +41,11 @@ export function createFileAdapter(options: FileAdapterOptions): FileStorageAdapt
   const fileExtension = `.${options.format}`;
   const fs = options.fs ?? defaultFsProvider;
   const mode = options.mode ?? 'in-memory';
+
+  // CSV and XLSX are structured as single tables, so they only make sense with on-demand, multi-file storage.
+  if ((options.format === 'csv' || options.format === 'xlsx') && (mode !== 'on-demand' || !options.multi)) {
+    throw KonroError(`The '${options.format}' format only supports the 'on-demand' mode with the 'multi-file' storage strategy.`);
+  }
 
   // The 'on-demand' mode is fundamentally incompatible with a single-file approach
   if (mode === 'on-demand' && options.single) {

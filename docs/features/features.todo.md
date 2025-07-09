@@ -2,6 +2,10 @@ konro error codes. code and description list should be in separated ts file
 
 ####
 
+add cases regarding on-demand multi of csv and  xlsx to test/integration/Adapters/OnDemand.test.ts
+
+####
+
 beside yaml and json, it also do with csv and xlsx. they should only support while on-demand multi. 
 
 ####
@@ -9,3 +13,5 @@ beside yaml and json, it also do with csv and xlsx. they should only support whi
 update readme for on demand feature
 
 
+
+Must provide ID for CSV/XLSX as lastId is not persisted

@@ -12,6 +12,8 @@ src/utils/constants.ts
 src/utils/error.util.ts
 src/utils/predicate.util.ts
 src/utils/serializer.util.ts
+test/integration/Adapters/OnDemand.test.ts
+test/util.ts
 tsconfig.json
 ```
 
@@ -32,6 +34,181 @@ export const createPredicateFromPartial = <T extends KRecord>(partial: Partial<T
   const keys = Object.keys(partial) as (keyof T)[];
   return (record: T): boolean => keys.every(key => record[key] === partial[key]);
 };
+```
+
+## File: test/integration/Adapters/OnDemand.test.ts
+```typescript
+import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
+import { konro } from '../../../src/index';
+import { testSchema, TEST_DIR, cleanup, ensureTestDir } from '../../util';
+import path from 'path';
+import { promises as fs } from 'fs';
+import yaml from 'js-yaml';
+import { KonroError } from '../../../src/utils/error.util';
+import type { OnDemandDbContext } from '../../../src/db';
+
+describe('Integration > Adapters > OnDemand', () => {
+  const dbDirPath = path.join(TEST_DIR, 'on_demand_db');
+
+  beforeEach(ensureTestDir);
+  afterEach(cleanup);
+
+  describe('Initialization', () => {
+    it('should successfully create an on-demand db context with a multi-file adapter', () => {
+      const adapter = konro.createFileAdapter({
+        format: 'yaml',
+        mode: 'on-demand',
+        multi: { dir: dbDirPath },
+      });
+      const db = konro.createDatabase({
+        schema: testSchema,
+        adapter,
+      });
+
+      expect(db).toBeDefined();
+      expect(db.adapter.mode).toBe('on-demand');
+      expect(typeof db.insert).toBe('function');
+      expect(typeof db.query).toBe('function');
+    });
+
+    it('should throw an error when creating an on-demand db context with a single-file adapter', () => {
+      expect(() => {
+        konro.createFileAdapter({
+          format: 'json',
+          mode: 'on-demand',
+          single: { filepath: path.join(dbDirPath, 'db.json') },
+        });
+      }).toThrow(KonroError("The 'on-demand' mode requires the 'multi-file' storage strategy."));
+    });
+  });
+
+  describe('Unsupported Operations', () => {
+    const adapter = konro.createFileAdapter({
+      format: 'yaml',
+      mode: 'on-demand',
+      multi: { dir: dbDirPath },
+    });
+    const db = konro.createDatabase({
+      schema: testSchema,
+      adapter,
+    });
+    
+    it('should reject db.read()', async () => {
+      expect(db.read()).rejects.toThrow(KonroError("This method is not supported in 'on-demand' mode."));
+    });
+
+    it('should reject db.write()', async () => {
+      expect(db.write()).rejects.toThrow(KonroError("This method is not supported in 'on-demand' mode."));
+    });
+  });
+
+  describe('CRUD Operations', () => {
+    let db: OnDemandDbContext<typeof testSchema>;
+
+    beforeEach(() => {
+      const adapter = konro.createFileAdapter({
+        format: 'yaml',
+        mode: 'on-demand',
+        multi: { dir: dbDirPath },
+      });
+      db = konro.createDatabase({
+        schema: testSchema,
+        adapter,
+      });
+    });
+
+    it('should insert a record and write it to the correct file', async () => {
+      const user = await db.insert('users', {
+        name: 'OnDemand User',
+        email: 'ondemand@test.com',
+        age: 25,
+      });
+
+      expect(user.id).toBe(1);
+      expect(user.name).toBe('OnDemand User');
+
+      const userFilePath = path.join(dbDirPath, 'users.yaml');
+      const fileContent = await fs.readFile(userFilePath, 'utf-8');
+      const parsedContent = yaml.load(fileContent) as any;
+
+      expect(parsedContent.records.length).toBe(1);
+      expect(parsedContent.records[0].name).toBe('OnDemand User');
+      expect(parsedContent.meta.lastId).toBe(1);
+    });
+
+    it('should query for records', async () => {
+      await db.insert('users', { name: 'Query User', email: 'q@test.com', age: 30 });
+      
+      const user = await db.query().from('users').where({ name: 'Query User' }).first();
+      expect(user).toBeDefined();
+      expect(user?.name).toBe('Query User');
+
+      const allUsers = await db.query().from('users').all();
+      expect(allUsers.length).toBe(1);
+    });
+
+    it('should update a record', async () => {
+      const user = await db.insert('users', { name: 'Update Me', email: 'u@test.com', age: 40 });
+      
+      const updatedUsers = await db.update('users')
+        .set({ name: 'Updated Name' })
+        .where({ id: user.id });
+
+      expect(updatedUsers.length).toBe(1);
+      expect(updatedUsers[0]?.name).toBe('Updated Name');
+
+      const userFilePath = path.join(dbDirPath, 'users.yaml');
+      const fileContent = await fs.readFile(userFilePath, 'utf-8');
+      const parsedContent = yaml.load(fileContent) as any;
+      
+      expect(parsedContent.records[0].name).toBe('Updated Name');
+    });
+
+    it('should delete a record', async () => {
+      const user = await db.insert('users', { name: 'Delete Me', email: 'd@test.com', age: 50 });
+      
+      await db.delete('users').where({ id: user.id });
+
+      const users = await db.query().from('users').all();
+      expect(users.length).toBe(0);
+
+      const userFilePath = path.join(dbDirPath, 'users.yaml');
+      const fileContent = await fs.readFile(userFilePath, 'utf-8');
+      const parsedContent = yaml.load(fileContent) as any;
+      
+      expect(parsedContent.records.length).toBe(0);
+    });
+    
+    it('should query with relations', async () => {
+      const user = await db.insert('users', { name: 'Author', email: 'author@test.com', age: 35 });
+      await db.insert('posts', { title: 'Post by Author', content: '...', authorId: user.id });
+      await db.insert('posts', { title: 'Another Post', content: '...', authorId: user.id });
+      
+      const userWithPosts = await db.query().from('users').where({ id: user.id }).with({ posts: true }).first();
+      
+      expect(userWithPosts).toBeDefined();
+      expect(userWithPosts?.name).toBe('Author');
+      expect(userWithPosts?.posts).toBeInstanceOf(Array);
+      expect(userWithPosts?.posts?.length).toBe(2);
+      expect(userWithPosts?.posts?.[0]?.title).toBe('Post by Author');
+    });
+
+    it('should perform aggregations', async () => {
+      await db.insert('users', { name: 'Agg User 1', email: 'agg1@test.com', age: 20 });
+      await db.insert('users', { name: 'Agg User 2', email: 'agg2@test.com', age: 30 });
+      
+      const result = await db.query().from('users').aggregate({
+        count: konro.count(),
+        avgAge: konro.avg('age'),
+        sumAge: konro.sum('age'),
+      });
+      
+      expect(result.count).toBe(2);
+      expect(result.avgAge).toBe(25);
+      expect(result.sumAge).toBe(50);
+    });
+  });
+});
 ```
 
 ## File: src/fs.ts
@@ -107,43 +284,6 @@ export const KonroValidationError = createKonroError('KonroValidationError');
 
 /** Thrown when a resource is not found. */
 export const KonroNotFoundError = createKonroError('KonroNotFoundError');
-```
-
-## File: src/utils/serializer.util.ts
-```typescript
-import { KonroStorageError } from './error.util';
-
-let yaml: { load: (str: string) => unknown; dump: (obj: any, options?: any) => string; } | undefined;
-try {
-  // Lazily attempt to load optional dependency
-  yaml = require('js-yaml');
-} catch {
-  // js-yaml is not installed.
-}
-
-export type Serializer = {
-  parse: <T>(data: string) => T;
-  stringify: (obj: any) => string;
-};
-
-export const getSerializer = (format: 'json' | 'yaml'): Serializer => {
-  if (format === 'json') {
-    return {
-      parse: <T>(data: string): T => JSON.parse(data),
-      stringify: (obj: any): string => JSON.stringify(obj, null, 2),
-    };
-  }
-
-  if (!yaml) {
-    throw KonroStorageError("The 'yaml' format requires 'js-yaml' to be installed. Please run 'npm install js-yaml'.");
-  }
-
-  return {
-    // The cast from `unknown` is necessary as `yaml.load` is correctly typed to return `unknown`.
-    parse: <T>(data: string): T => yaml.load(data) as T,
-    stringify: (obj: any): string => yaml.dump(obj),
-  };
-};
 ```
 
 ## File: src/index.ts
@@ -224,6 +364,182 @@ export type DatabaseState<S extends KonroSchema<any, any> | unknown = unknown> =
     };
 ```
 
+## File: src/utils/serializer.util.ts
+```typescript
+import { KonroStorageError } from './error.util';
+
+let yaml: { load: (str: string) => unknown; dump: (obj: any, options?: any) => string; } | undefined;
+try {
+  // Lazily attempt to load optional dependency
+  yaml = require('js-yaml');
+} catch {
+  // js-yaml is not installed.
+}
+
+let papaparse: { parse: (str: string, config?: any) => { data: any[] }; unparse: (data: any[] | object) => string; } | undefined;
+try {
+  papaparse = require('papaparse');
+} catch {
+  // papaparse is not installed
+}
+
+let xlsx: { read: (data: any, opts: any) => any; utils: { sheet_to_json: <T>(ws: any) => T[]; json_to_sheet: (json: any) => any; book_new: () => any; book_append_sheet: (wb: any, ws: any, name: string) => void; }; write: (wb: any, opts: any) => any; } | undefined;
+try {
+  xlsx = require('xlsx');
+} catch {
+  // xlsx is not installed
+}
+
+export type Serializer = {
+  parse: <T>(data: string) => T;
+  stringify: (obj: any) => string;
+};
+
+export const getSerializer = (format: 'json' | 'yaml' | 'csv' | 'xlsx'): Serializer => {
+  if (format === 'json') {
+    return {
+      parse: <T>(data: string): T => JSON.parse(data),
+      stringify: (obj: any): string => JSON.stringify(obj, null, 2),
+    };
+  }
+
+  if (format === 'yaml') {
+    if (!yaml) {
+      throw KonroStorageError("The 'yaml' format requires 'js-yaml' to be installed. Please run 'npm install js-yaml'.");
+    }
+
+    return {
+      // The cast from `unknown` is necessary as `yaml.load` is correctly typed to return `unknown`.
+      parse: <T>(data: string): T => yaml.load(data) as T,
+      stringify: (obj: any): string => yaml.dump(obj),
+    };
+  }
+
+  if (format === 'csv') {
+    if (!papaparse) {
+      throw KonroStorageError("The 'csv' format requires 'papaparse' to be installed. Please run 'npm install papaparse'.");
+    }
+    return {
+      parse: <T>(data: string): T => {
+        const { data: records } = papaparse!.parse(data, { header: true, dynamicTyping: true, skipEmptyLines: true });
+        // CSV does not support metadata storage. lastId is set to 0.
+        // This means auto-incrementing IDs are not safely supported for CSV. Use UUIDs instead.
+        return { records, meta: { lastId: 0 } } as T;
+      },
+      stringify: (obj: any): string => papaparse!.unparse(obj.records || []),
+    };
+  }
+
+  if (format === 'xlsx') {
+    if (!xlsx) {
+      throw KonroStorageError("The 'xlsx' format requires 'xlsx' to be installed. Please run 'npm install xlsx'.");
+    }
+    return {
+      parse: <T>(data: string): T => {
+        const workbook = xlsx!.read(data, { type: 'base64' });
+        const sheetName = workbook.SheetNames[0];
+        if (!sheetName) return { records: [], meta: { lastId: 0 } } as T;
+        const worksheet = workbook.Sheets[sheetName];
+        const records = xlsx!.utils.sheet_to_json(worksheet);
+        return { records, meta: { lastId: 0 } } as T;
+      },
+      stringify: (obj: any): string => {
+        const worksheet = xlsx!.utils.json_to_sheet(obj.records || []);
+        const workbook = xlsx!.utils.book_new();
+        xlsx!.utils.book_append_sheet(workbook, worksheet, 'data');
+        return xlsx!.write(workbook, { bookType: 'xlsx', type: 'base64' });
+      },
+    };
+  }
+
+  // This should be unreachable with TypeScript, but provides a safeguard.
+  throw KonroStorageError(`Unsupported or invalid format specified.`);
+};
+```
+
+## File: test/util.ts
+```typescript
+import { konro } from '../src/index';
+import { promises as fs } from 'fs';
+import path from 'path';
+
+export const TEST_DIR = path.join(__dirname, 'test_run_data');
+
+// --- Schema Definition ---
+
+const tables = {
+  users: {
+    id: konro.id(),
+    name: konro.string({ min: 2 }),
+    email: konro.string({ unique: true, format: 'email' }),
+    age: konro.number({ min: 18, type: 'integer' }),
+    isActive: konro.boolean({ default: true }),
+  },
+  posts: {
+    id: konro.id(),
+    title: konro.string(),
+    content: konro.string(),
+    authorId: konro.number(),
+    publishedAt: konro.date({ default: () => new Date() }),
+  },
+  profiles: {
+    id: konro.id(),
+    bio: konro.string(),
+    userId: konro.number({ unique: true }),
+  },
+  tags: {
+    id: konro.id(),
+    name: konro.string({ unique: true }),
+  },
+  posts_tags: {
+    id: konro.id(),
+    postId: konro.number(),
+    tagId: konro.number(),
+  },
+};
+
+export const schemaDef = {
+  tables,
+  relations: (_tables: typeof tables) => ({
+    users: {
+      posts: konro.many('posts', { on: 'id', references: 'authorId' }),
+      profile: konro.one('profiles', { on: 'id', references: 'userId' }),
+    },
+    posts: {
+      author: konro.one('users', { on: 'authorId', references: 'id' }),
+      tags: konro.many('posts_tags', { on: 'id', references: 'postId' }),
+    },
+    profiles: {
+      user: konro.one('users', { on: 'userId', references: 'id' }),
+    },
+    posts_tags: {
+      post: konro.one('posts', { on: 'postId', references: 'id' }),
+      tag: konro.one('tags', { on: 'tagId', references: 'id' }),
+    }
+  }),
+};
+
+export const testSchema = konro.createSchema(schemaDef);
+
+export type UserCreate = typeof testSchema.create.users;
+
+// --- Test Utilities ---
+
+export const cleanup = async () => {
+  try {
+    await fs.rm(TEST_DIR, { recursive: true, force: true });
+  } catch (error: any) {
+    if (error.code !== 'ENOENT') {
+      console.error('Error during cleanup:', error);
+    }
+  }
+};
+
+export const ensureTestDir = async () => {
+  await fs.mkdir(TEST_DIR, { recursive: true });
+}
+```
+
 ## File: tsconfig.json
 ```json
 {
@@ -286,6 +602,8 @@ export type DatabaseState<S extends KonroSchema<any, any> | unknown = unknown> =
     "orm",
     "json",
     "yaml",
+    "csv",
+    "xlsx",
     "database",
     "typescript",
     "local-first",
@@ -297,6 +615,7 @@ export type DatabaseState<S extends KonroSchema<any, any> | unknown = unknown> =
   "devDependencies": {
     "@types/bun": "latest",
     "@types/js-yaml": "^4.0.9",
+    "@types/papaparse": "^5.3.14",
     "@typescript-eslint/eslint-plugin": "^8.36.0",
     "@typescript-eslint/parser": "^8.36.0",
     "eslint": "^9.30.1",
@@ -305,10 +624,18 @@ export type DatabaseState<S extends KonroSchema<any, any> | unknown = unknown> =
   },
   "peerDependencies": {
     "js-yaml": "^4.1.0",
-    "typescript": "^5.0.0"
+    "papaparse": "^5.4.1",
+    "typescript": "^5.0.0",
+    "xlsx": "^0.18.5"
   },
   "peerDependenciesMeta": {
     "js-yaml": {
+      "optional": true
+    },
+    "papaparse": {
+      "optional": true
+    },
+    "xlsx": {
       "optional": true
     }
   },
@@ -348,7 +675,7 @@ type SingleFileStrategy = { single: { filepath: string }; multi?: never };
 type MultiFileStrategy = { multi: { dir: string }; single?: never };
 
 export type FileAdapterOptions = {
-  format: 'json' | 'yaml';
+  format: 'json' | 'yaml' | 'csv' | 'xlsx';
   fs?: FsProvider;
   /**
    * Defines the data access strategy.
@@ -366,6 +693,11 @@ export function createFileAdapter(options: FileAdapterOptions): FileStorageAdapt
   const fileExtension = `.${options.format}`;
   const fs = options.fs ?? defaultFsProvider;
   const mode = options.mode ?? 'in-memory';
+
+  // CSV and XLSX are structured as single tables, so they only make sense with on-demand, multi-file storage.
+  if ((options.format === 'csv' || options.format === 'xlsx') && (mode !== 'on-demand' || !options.multi)) {
+    throw KonroError(`The '${options.format}' format only supports the 'on-demand' mode with the 'multi-file' storage strategy.`);
+  }
 
   // The 'on-demand' mode is fundamentally incompatible with a single-file approach
   if (mode === 'on-demand' && options.single) {

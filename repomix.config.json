@@ -30,7 +30,7 @@
     // "test/e2e",
     "test/util.ts",
     // "README.md"
-    "test/integration"
+    "test/integration/Adapters/OnDemand.test.ts"
 
   ],
   "ignore": {

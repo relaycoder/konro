@@ -233,7 +233,7 @@ function createOnDemandDbContext<S extends KonroSchema<any, any>>(
     const data = await adapter.fs.readFile(filepath);
     if (!data) return { records: [], meta: { lastId: 0 } };
     try {
-      return adapter.serializer.parse(data);
+      return adapter.serializer.parse(data, schema.tables[tableName]);
     } catch (e: any) {
       throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${adapter.options.format} file. Original error: ${e.message}`);
     }

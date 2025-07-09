@@ -1,4 +1,5 @@
 import { KonroStorageError } from './error.util';
+import type { ColumnDefinition } from '../schema';
 
 let yaml: { load: (str: string) => unknown; dump: (obj: any, options?: any) => string; } | undefined;
 try {
@@ -23,7 +24,7 @@ try {
 }
 
 export type Serializer = {
-  parse: <T>(data: string) => T;
+  parse: <T>(data: string, tableSchema?: Record<string, ColumnDefinition<any>>) => T;
   stringify: (obj: any) => string;
 };
 
@@ -52,11 +53,22 @@ export const getSerializer = (format: 'json' | 'yaml' | 'csv' | 'xlsx'): Seriali
       throw KonroStorageError("The 'csv' format requires 'papaparse' to be installed. Please run 'npm install papaparse'.");
     }
     return {
-      parse: <T>(data: string): T => {
+      parse: <T>(data: string, tableSchema?: Record<string, ColumnDefinition<any>>): T => {
         const { data: records } = papaparse!.parse(data, { header: true, dynamicTyping: true, skipEmptyLines: true });
-        // CSV does not support metadata storage. lastId is set to 0.
-        // This means auto-incrementing IDs are not safely supported for CSV. Use UUIDs instead.
-        return { records, meta: { lastId: 0 } } as T;
+        // For CSV/XLSX, metadata isn't stored. We derive lastId from the data itself.
+        let lastId = 0;
+        if (tableSchema) {
+          const idColumn = Object.keys(tableSchema).find(
+            (key) => tableSchema[key]?.dataType === 'id' && tableSchema[key]?.options?._pk_strategy !== 'uuid'
+          );
+          if (idColumn) {
+            lastId = (records as any[]).reduce((maxId, record) => {
+              const id = record[idColumn];
+              return typeof id === 'number' && id > maxId ? id : maxId;
+            }, 0);
+          }
+        }
+        return { records, meta: { lastId } } as T;
       },
       stringify: (obj: any): string => papaparse!.unparse(obj.records || []),
     };
@@ -67,13 +79,26 @@ export const getSerializer = (format: 'json' | 'yaml' | 'csv' | 'xlsx'): Seriali
       throw KonroStorageError("The 'xlsx' format requires 'xlsx' to be installed. Please run 'npm install xlsx'.");
     }
     return {
-      parse: <T>(data: string): T => {
+      parse: <T>(data: string, tableSchema?: Record<string, ColumnDefinition<any>>): T => {
         const workbook = xlsx!.read(data, { type: 'base64' });
         const sheetName = workbook.SheetNames[0];
         if (!sheetName) return { records: [], meta: { lastId: 0 } } as T;
         const worksheet = workbook.Sheets[sheetName];
         const records = xlsx!.utils.sheet_to_json(worksheet);
-        return { records, meta: { lastId: 0 } } as T;
+        // For CSV/XLSX, metadata isn't stored. We derive lastId from the data itself.
+        let lastId = 0;
+        if (tableSchema) {
+          const idColumn = Object.keys(tableSchema).find(
+            (key) => tableSchema[key]?.dataType === 'id' && tableSchema[key]?.options?._pk_strategy !== 'uuid'
+          );
+          if (idColumn) {
+            lastId = (records as any[]).reduce((maxId: number, record: any) => {
+              const id = record[idColumn];
+              return typeof id === 'number' && id > maxId ? id : maxId;
+            }, 0);
+          }
+        }
+        return { records, meta: { lastId } } as T;
       },
       stringify: (obj: any): string => {
         const worksheet = xlsx!.utils.json_to_sheet(obj.records || []);

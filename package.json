@@ -1,6 +1,6 @@
 {
   "name": "konro",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "A type-safe, functional micro-ORM for JSON/YAML files.",
   "type": "module",
   "main": "./dist/index.js",

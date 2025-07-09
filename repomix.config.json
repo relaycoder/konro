@@ -26,8 +26,12 @@
     "package.json",
     "tsconfig.json",
     // "src",
-    "src/utils",
+    // "src/utils",
     "src/adapter.ts",
+    "src/db.ts",
+    "src/fs.ts",
+    "src/operations.ts",
+    "src/schema.ts",
     "src/types.ts"
     // "test/unit/Schema/ColumnHelpers.test.ts",
     // "test/e2e",

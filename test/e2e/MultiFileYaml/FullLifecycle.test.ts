@@ -41,7 +41,7 @@ describe('E2E > MultiFileYaml > FullLifecycle', () => {
     expect(readState.users!.records[0]?.id).toBe(user.id);
 
     // 4. Query with relations
-    const userWithPosts = await db.query(readState).from('users').where({ id: user.id }).with({ posts: true }).first();
+    const userWithPosts = db.query(readState).from('users').where({ id: user.id }).with({ posts: true }).first();
     expect(userWithPosts).toBeDefined();
     if (userWithPosts) {
       expect(userWithPosts.posts).toBeDefined();

@@ -61,7 +61,7 @@ function createCoreDbContext<S extends KonroSchema<any, any>>(schema: S) {
         select(fields) { return createBuilder<TReturn>({ ...currentDescriptor, select: fields as QueryDescriptor['select'] }); },
         where(predicate) { return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate) }); },
         withDeleted() { return createBuilder<TReturn>({ ...currentDescriptor, withDeleted: true }); },
-        with<W extends WithArgument<S['types'][TName]>>(relations: W) {
+        with<W extends WithArgument<S, TName>>(relations: W) {
           const newWith = { ...currentDescriptor.with, ...(relations as QueryDescriptor['with']) };
           return createBuilder<TReturn & ResolveWith<S, TName, W>>({ ...currentDescriptor, with: newWith });
         },
@@ -134,7 +134,7 @@ function createOnDemandDbContext<S extends KonroSchema<any, any>>(
         select(fields) { return createBuilder<TReturn>({ ...currentDescriptor, select: fields as QueryDescriptor['select'] }); },
         where(predicate) { return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate) }); },
         withDeleted() { return createBuilder<TReturn>({ ...currentDescriptor, withDeleted: true }); },
-        with<W extends WithArgument<S['types'][TName]>>(relations: W) {
+        with<W extends WithArgument<S, TName>>(relations: W) {
           const newWith = { ...currentDescriptor.with, ...(relations as QueryDescriptor['with']) };
           return createBuilder<TReturn & ResolveWith<S, TName, W>>({ ...currentDescriptor, with: newWith });
         },

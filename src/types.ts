@@ -60,7 +60,7 @@ type Models<
             : never;
         }
       : {});
-};
+} & { [key: string]: any };
 
 /** Finds all column names in a table definition that are optional for insertion (i.e., `id`, has a `default`, or is `optional`). */
 type OptionalCreateKeys<TTableDef> = {
@@ -152,7 +152,7 @@ export type Serializer = {
 
 export interface StorageAdapter {
   read<S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>>;
-  write(state: DatabaseState<any>, schema: KonroSchema<any, any>): Promise<void>;
+  write<S extends KonroSchema<any, any>>(state: DatabaseState<S>, schema: S): Promise<void>;
   readonly mode: 'in-memory' | 'on-demand';
 }
 
@@ -204,47 +204,47 @@ export interface AggregationDescriptor extends QueryDescriptor {
 
 // --- DB Context & Fluent API Types (from db.ts) ---
 
-type RelatedModel<T> = T extends (infer R)[] ? R : T extends (infer R | null) ? R : T;
-
-export type WithArgument<TAll> = {
-  [K in keyof TAll as NonNullable<TAll[K]> extends any[] | object ? K : never]?: boolean | ({
-    where?: (record: RelatedModel<NonNullable<TAll[K]>>) => boolean;
+export type WithArgument<
+  S extends KonroSchema<any, any>,
+  TName extends keyof S['tables']
+> = {
+  [K in keyof S['relations'][TName]]?: boolean | ({
+    where?: (record: S['base'][S['relations'][TName][K]['targetTable']]) => boolean;
   } & (
     | { select: Record<string, ColumnDefinition<unknown>>; with?: never }
-    | { select?: never; with?: WithArgument<RelatedModel<NonNullable<TAll[K]>>> }
+    | { select?: never; with?: WithArgument<S, S['relations'][TName][K]['targetTable']> }
   ));
 };
 
 export type ResolveWith<
   S extends KonroSchema<any, any>,
   TName extends keyof S['tables'],
-  TWith extends WithArgument<S['types'][TName]>
+  TWith extends WithArgument<S, TName>
 > = {
-    [K in keyof TWith & keyof S['relations'][TName]]:
-        S['relations'][TName][K] extends { relationType: 'many' }
-            ? (
-                TWith[K] extends { select: infer TSelect }
-                    ? ({ [P in keyof TSelect]: InferColumnType<TSelect[P]> })[]
-                    : TWith[K] extends { with: infer TNestedWith }
-                        ? (S['base'][S['relations'][TName][K]['targetTable']] & ResolveWith<S, S['relations'][TName][K]['targetTable'], TNestedWith & WithArgument<S['types'][S['relations'][TName][K]['targetTable']]>>)[]
-                        : S['base'][S['relations'][TName][K]['targetTable']][]
-              )
-            : S['relations'][TName][K] extends { relationType: 'one' }
-                ? (
-                    TWith[K] extends { select: infer TSelect }
-                        ? ({ [P in keyof TSelect]: InferColumnType<TSelect[P]> }) | null
-                        : TWith[K] extends { with: infer TNestedWith }
-                            ? (S['base'][S['relations'][TName][K]['targetTable']] & ResolveWith<S, S['relations'][TName][K]['targetTable'], TNestedWith & WithArgument<S['types'][S['relations'][TName][K]['targetTable']]>>) | null
-                            : S['base'][S['relations'][TName][K]['targetTable']] | null
-                  )
-                : never
+  [K in keyof TWith & keyof S['relations'][TName]]:
+ S['relations'][TName][K] extends { relationType: 'many' }
+    ? TWith[K] extends { select: infer TSelect }
+      ? { [P in keyof TSelect]: InferColumnType<TSelect[P]> }[]
+      : TWith[K] extends { with: infer TNestedWith }
+      ? (S['base'][S['relations'][TName][K]['targetTable']] &
+          ResolveWith<S, S['relations'][TName][K]['targetTable'], TNestedWith & WithArgument<S, S['relations'][TName][K]['targetTable']>>)[]
+      : S['base'][S['relations'][TName][K]['targetTable']][]
+    : S['relations'][TName][K] extends { relationType: 'one' }
+    ? TWith[K] extends { select: infer TSelect }
+      ? { [P in keyof TSelect]: InferColumnType<TSelect[P]> } | null
+      : TWith[K] extends { with: infer TNestedWith }
+      ? (S['base'][S['relations'][TName][K]['targetTable']] &
+          ResolveWith<S, S['relations'][TName][K]['targetTable'], TNestedWith & WithArgument<S, S['relations'][TName][K]['targetTable']>>) | null
+      : S['base'][S['relations'][TName][K]['targetTable']] | null
+    : never
+;
 };
 
 export interface ChainedQueryBuilder<S extends KonroSchema<any, any>, TName extends keyof S['tables'], TReturn> {
   select(fields: Record<string, ColumnDefinition<unknown> | RelationDefinition>): this;
   where(predicate: Partial<S['base'][TName]> | ((record: S['base'][TName]) => boolean)): this;
   withDeleted(): this;
-  with<W extends WithArgument<S['types'][TName]>>(relations: W): ChainedQueryBuilder<S, TName, TReturn & ResolveWith<S, TName, W>>;
+  with<W extends WithArgument<S, TName>>(relations: W): ChainedQueryBuilder<S, TName, TReturn & ResolveWith<S, TName, W>>;
   limit(count: number): this;
   offset(count: number): this;
   all(): TReturn[];
@@ -286,7 +286,7 @@ export interface OnDemandChainedQueryBuilder<S extends KonroSchema<any, any>, TN
   select(fields: Record<string, ColumnDefinition<unknown> | RelationDefinition>): this;
   where(predicate: Partial<S['base'][TName]> | ((record: S['base'][TName]) => boolean)): this;
   withDeleted(): this;
-  with<W extends WithArgument<S['types'][TName]>>(relations: W): OnDemandChainedQueryBuilder<S, TName, TReturn & ResolveWith<S, TName, W>>;
+  with<W extends WithArgument<S, TName>>(relations: W): OnDemandChainedQueryBuilder<S, TName, TReturn & ResolveWith<S, TName, W>>;
   limit(count: number): this;
   offset(count: number): this;
   all(): Promise<TReturn[]>;

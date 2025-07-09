@@ -1,0 +1,10 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+1. reduce the linter problems of `bun run build ; bun tsc -b` by only modifying uncompiled source "src/types.ts", "src/db.ts", "src/schema.ts"
+2. focus on reducing linter problems rather than passing test.
+3. test are intentionally import from compiled dist.
+4. your main task is make sure no linter problems on compiled. by only modifying above three file.
+5. you are forbidden to modify any files than above three

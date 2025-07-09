@@ -71,7 +71,7 @@ type BaseStringOptions = {
 /** A string column with optional validation. */
 export function string(options: BaseStringOptions & { optional: true; default?: string | null | (() => string | null) }): ColumnDefinition<string | null>;
 export function string(options?: BaseStringOptions & { optional?: false; default?: string | (() => string) }): ColumnDefinition<string>;
-export function string(options?: BaseStringOptions & { optional?: boolean; default?: string | null | (() => string | null) | (() => string) }): ColumnDefinition<string> | ColumnDefinition<string | null> {
+export function string(options?: BaseStringOptions & { optional?: boolean; default?: unknown }): ColumnDefinition<string> | ColumnDefinition<string | null> {
   if (options?.optional) {
     return createColumn<string | null>('string', options, null);
   }
@@ -87,7 +87,7 @@ type BaseNumberOptions = {
 /** A number column with optional validation. */
 export function number(options: BaseNumberOptions & { optional: true; default?: number | null | (() => number | null) }): ColumnDefinition<number | null>;
 export function number(options?: BaseNumberOptions & { optional?: false; default?: number | (() => number) }): ColumnDefinition<number>;
-export function number(options?: BaseNumberOptions & { optional?: boolean; default?: number | null | (() => number | null) | (() => number) }): ColumnDefinition<number> | ColumnDefinition<number | null> {
+export function number(options?: BaseNumberOptions & { optional?: boolean; default?: unknown }): ColumnDefinition<number> | ColumnDefinition<number | null> {
   if (options?.optional) {
     return createColumn<number | null>('number', options, null);
   }
@@ -97,7 +97,7 @@ export function number(options?: BaseNumberOptions & { optional?: boolean; defau
 /** A boolean column. */
 export function boolean(options: { optional: true; default?: boolean | null | (() => boolean | null) }): ColumnDefinition<boolean | null>;
 export function boolean(options?: { optional?: false; default?: boolean | (() => boolean) }): ColumnDefinition<boolean>;
-export function boolean(options?: { optional?: boolean; default?: boolean | null | (() => boolean | null) | (() => boolean) }): ColumnDefinition<boolean> | ColumnDefinition<boolean | null> {
+export function boolean(options?: { optional?: boolean; default?: unknown }): ColumnDefinition<boolean> | ColumnDefinition<boolean | null> {
   if (options?.optional) {
     return createColumn<boolean | null>('boolean', options, null);
   }
@@ -107,7 +107,7 @@ export function boolean(options?: { optional?: boolean; default?: boolean | null
 /** A generic date column. Consider using `createdAt` or `updatedAt` for managed timestamps. */
 export function date(options: { optional: true; default?: Date | null | (() => Date | null) }): ColumnDefinition<Date | null>;
 export function date(options?: { optional?: false; default?: Date | (() => Date) }): ColumnDefinition<Date>;
-export function date(options?: { optional?: boolean; default?: Date | null | (() => Date | null) | (() => Date) }): ColumnDefinition<Date> | ColumnDefinition<Date | null> {
+export function date(options?: { optional?: boolean; default?: unknown }): ColumnDefinition<Date> | ColumnDefinition<Date | null> {
   if (options?.optional) {
     return createColumn<Date | null>('date', options, null);
   }
@@ -123,8 +123,7 @@ export const deletedAt = (): ColumnDefinition<Date | null> => createColumn<Date 
 /** A column for storing arbitrary JSON objects, with a generic for type safety. */
 export function object<T extends Record<string, unknown>>(options: { optional: true; default?: T | null | (() => T | null) }): ColumnDefinition<T | null>;
 export function object<T extends Record<string, unknown>>(options?: { optional?: false; default?: T | (() => T) }): ColumnDefinition<T>;
-export function object<T extends Record<string, unknown>>(
-  options?: { optional?: boolean; default?: T | null | (() => T | null) | (() => T) }
+export function object<T extends Record<string, unknown>>(options?: { optional?: boolean; default?: unknown }
 ): ColumnDefinition<T | null> | ColumnDefinition<T> {
   if (options?.optional) {
     // The cast here is to satisfy the generic constraint on the implementation.

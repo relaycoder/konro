@@ -68,6 +68,11 @@
     "lint": "eslint .",
     "build": "tsup",
     "dev": "tsup --watch",
+    "test": "bun test",
+    "test:restore-importer": "git checkout -- test/konro-test-import.ts",
+    "test:src": "npm run test:restore-importer && bun test",
+    "test:dist:mjs": "npm run build && echo \"export * from '../dist/index.mjs';\" > test/konro-test-import.ts && bun test && npm run test:restore-importer",
+    "test:dist:js": "npm run build && echo \"export * from '../dist/index.js';\" > test/konro-test-import.ts && bun test && npm run test:restore-importer",
     "prepublishOnly": "npm run build"
   }
 }

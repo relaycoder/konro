@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { konro } from '../../../src/index';
+import { konro } from '../../konro-test-import';
 import { testSchema } from '../../util';
 import path from 'path';
 

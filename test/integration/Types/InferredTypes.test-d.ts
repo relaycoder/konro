@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { konro } from '../../../src/index';
+import { konro } from '../../konro-test-import';
 import { schemaDef } from '../../util';
 
 /**

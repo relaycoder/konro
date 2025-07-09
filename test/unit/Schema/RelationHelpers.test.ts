@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { konro } from '../../../src/index';
+import { konro } from '../../konro-test-import';
 
 describe('Unit > Schema > RelationHelpers', () => {
   it('should create a valid one-to-many relationship definition object when calling konro.many()', () => {

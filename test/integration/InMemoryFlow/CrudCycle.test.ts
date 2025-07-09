@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
-import { konro } from '../../../src/index';
+import { konro } from '../../konro-test-import';
 import { testSchema } from '../../util';
 import path from 'path';
 import type { InMemoryDbContext } from '../../../src/db';

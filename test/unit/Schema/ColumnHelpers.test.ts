@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { konro } from '../../../src/index';
+import { konro } from '../../konro-test-import';
 
 describe('Unit > Schema > ColumnHelpers', () => {
   it('should create a valid ID column definition object when calling konro.id()', () => {

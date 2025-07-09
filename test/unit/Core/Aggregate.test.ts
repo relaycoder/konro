@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'bun:test';
 import { testSchema } from '../../util';
 import { _aggregateImpl } from '../../../src/operations';
 import { DatabaseState } from '../../../src/types';
-import { konro } from '../../../src/index';
+import { konro } from '../../konro-test-import';
 
 describe('Unit > Core > Aggregate', () => {
   let testState: DatabaseState;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'bun:test';
-import { konro } from '../../../src/index';
+import { konro } from '../../konro-test-import';
 
 describe('Unit > Schema > CreateSchema', () => {
   it('should correctly assemble a full schema object from tables and relations definitions', () => {

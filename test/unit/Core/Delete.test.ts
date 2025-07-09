@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { _deleteImpl } from '../../../src/operations';
 import { DatabaseState, KRecord } from '../../../src/types';
-import { konro } from '../../../src/index';
+import { konro } from '../../konro-test-import';
 
 describe('Unit > Core > Delete', () => {
     let testState: DatabaseState;

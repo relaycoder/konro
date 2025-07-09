@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'bun:test';
-import { konro } from '../../../src/index';
+import { konro } from '../../konro-test-import';
 import { testSchema, TEST_DIR, cleanup, ensureTestDir } from '../../util';
 import path from 'path';
 import { promises as fs } from 'fs';

@@ -1,4 +1,4 @@
-import { konro } from '../src/index';
+import { konro } from './konro-test-import';
 import { promises as fs } from 'fs';
 import path from 'path';
 

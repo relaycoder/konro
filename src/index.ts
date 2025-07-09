@@ -2,6 +2,30 @@ import { createDatabase } from './db';
 import { createFileAdapter } from './adapter';
 import { createSchema, id, uuid, string, number, boolean, date, createdAt, updatedAt, deletedAt, object, one, many, count, sum, avg, min, max } from './schema';
 
+export type {
+  // Core Schema & DB Types
+  KonroSchema,
+  DbContext,
+  InMemoryDbContext,
+  OnDemandDbContext,
+  DatabaseState,
+  KRecord,
+  // Schema Definition Types
+  ColumnDefinition,
+  RelationDefinition,
+  OneRelationDefinition,
+  ManyRelationDefinition,
+  AggregationDefinition,
+  // Adapter & FS Types
+  StorageAdapter,
+  FileAdapterOptions,
+  FileStorageAdapter,
+  SingleFileStrategy,
+  MultiFileStrategy,
+  PerRecordStrategy,
+  FsProvider,
+} from './types';
+
 /**
  * The main Konro object, providing access to all core functionalities
  * for schema definition, database creation, and adapter configuration.

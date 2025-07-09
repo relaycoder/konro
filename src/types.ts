@@ -62,11 +62,13 @@ type Models<
       : {});
 };
 
-/** Finds all column names in a table definition that are optional for insertion (i.e., `id` or has a `default`). */
+/** Finds all column names in a table definition that are optional for insertion (i.e., `id`, has a `default`, or is `optional`). */
 type OptionalCreateKeys<TTableDef> = {
   [K in keyof TTableDef]: TTableDef[K] extends { dataType: 'id' }
     ? K
     : TTableDef[K] extends { options: { default: unknown } }
+    ? K
+    : TTableDef[K] extends { options: { optional: true } }
     ? K
     : never;
 }[keyof TTableDef];

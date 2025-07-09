@@ -429,8 +429,8 @@ const validateRecord = (record: KRecord, tableSchema: Record<string, any>, exist
     // Skip validation for undefined values (they should have defaults applied already)
     if (value === undefined) continue;
 
-    // Validate unique constraint
-    if (options.unique && existingRecords.some(r => r[columnName] === value)) {
+    // Validate unique constraint, allowing multiple nulls
+    if (options.unique && value !== null && existingRecords.some(r => r[columnName] === value)) {
       throw KonroValidationError({ code: 'E300', value: String(value), columnName });
     }
 

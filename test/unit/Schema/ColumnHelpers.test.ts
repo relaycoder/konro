@@ -7,8 +7,18 @@ describe('Unit > Schema > ColumnHelpers', () => {
     expect(idCol).toEqual({
       _type: 'column',
       dataType: 'id',
-      options: { unique: true },
+      options: { unique: true, _pk_strategy: 'auto-increment' },
       _tsType: 0,
+    });
+  });
+
+  it('should create a valid UUID column definition object when calling konro.uuid()', () => {
+    const uuidCol = konro.uuid();
+    expect(uuidCol).toEqual({
+      _type: 'column',
+      dataType: 'id',
+      options: { unique: true, _pk_strategy: 'uuid' },
+      _tsType: '',
     });
   });
 

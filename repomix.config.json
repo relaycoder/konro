@@ -26,11 +26,11 @@
     "package.json",
     "tsconfig.json",
     "src",
+    "test/unit/Schema/ColumnHelpers.test.ts",
     // "test/e2e",
     "test/util.ts",
     // "README.md"
-    "test/integration/InMemoryFlow",
-    "test/integration/Types"
+    // "test/integration"
 
   ],
   "ignore": {

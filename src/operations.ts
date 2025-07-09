@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import { DatabaseState, KRecord } from './types';
 import { KonroSchema, RelationDefinition, ColumnDefinition, AggregationDefinition } from './schema';
 import { KonroError, KonroValidationError } from './utils/error.util';
@@ -249,8 +250,20 @@ export const _insertImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
     for (const colName in tableSchema) {
       const colDef = tableSchema[colName];
       if (colDef.dataType === 'id') {
-        tableState.meta.lastId++;
-        newRecord[colName] = tableState.meta.lastId;
+        if (newRecord[colName] === undefined) {
+          // Generate new PK if not provided
+          if (colDef.options?._pk_strategy === 'uuid') {
+            newRecord[colName] = randomUUID();
+          } else { // 'auto-increment' or legacy undefined strategy
+            tableState.meta.lastId++;
+            newRecord[colName] = tableState.meta.lastId;
+          }
+        } else {
+          // If user provided an ID for an auto-increment table, update lastId to avoid future collisions.
+          if (colDef.options?._pk_strategy !== 'uuid' && typeof newRecord[colName] === 'number') {
+            tableState.meta.lastId = Math.max(tableState.meta.lastId, newRecord[colName] as number);
+          }
+        }
       }
       if (newRecord[colName] === undefined && colDef.options?.default !== undefined) {
         newRecord[colName] = typeof colDef.options.default === 'function' ? colDef.options.default() : colDef.options.default;

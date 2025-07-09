@@ -12,13 +12,29 @@ src/utils/constants.ts
 src/utils/error.util.ts
 src/utils/predicate.util.ts
 src/utils/serializer.util.ts
-test/integration/InMemoryFlow/CrudCycle.test.ts
-test/integration/Types/InferredTypes.test-d.ts
+test/unit/Schema/ColumnHelpers.test.ts
 test/util.ts
 tsconfig.json
 ```
 
 # Files
+
+## File: src/utils/constants.ts
+```typescript
+export const TEMP_FILE_SUFFIX = '.tmp';
+```
+
+## File: src/utils/predicate.util.ts
+```typescript
+import { KRecord } from '../types';
+
+/** Creates a predicate function from a partial object for equality checks, avoiding internal casts. */
+export const createPredicateFromPartial = <T extends KRecord>(partial: Partial<T>): ((record: T) => boolean) => {
+  // `Object.keys` is cast because TypeScript types it as `string[]` instead of `(keyof T)[]`.
+  const keys = Object.keys(partial) as (keyof T)[];
+  return (record: T): boolean => keys.every(key => record[key] === partial[key]);
+};
+```
 
 ## File: src/fs.ts
 ```typescript
@@ -68,28 +84,11 @@ export const writeAtomic = async (
 };
 ```
 
-## File: src/utils/constants.ts
-```typescript
-export const TEMP_FILE_SUFFIX = '.tmp';
-```
-
-## File: src/utils/predicate.util.ts
-```typescript
-import { KRecord } from '../types';
-
-/** Creates a predicate function from a partial object for equality checks, avoiding internal casts. */
-export const createPredicateFromPartial = <T extends KRecord>(partial: Partial<T>): ((record: T) => boolean) => {
-  // `Object.keys` is cast because TypeScript types it as `string[]` instead of `(keyof T)[]`.
-  const keys = Object.keys(partial) as (keyof T)[];
-  return (record: T): boolean => keys.every(key => record[key] === partial[key]);
-};
-```
-
 ## File: src/index.ts
 ```typescript
 import { createDatabase } from './db';
 import { createFileAdapter } from './adapter';
-import { createSchema, id, string, number, boolean, date, object, one, many, count, sum, avg, min, max } from './schema';
+import { createSchema, id, uuid, string, number, boolean, date, object, one, many, count, sum, avg, min, max } from './schema';
 
 /**
  * The main Konro object, providing access to all core functionalities
@@ -113,6 +112,7 @@ export const konro = {
   createFileAdapter,
   // --- Column Definition Helpers ---
   id,
+  uuid,
   string,
   number,
   boolean,
@@ -226,125 +226,174 @@ export type DatabaseState<S extends KonroSchema<any, any> | unknown = unknown> =
     };
 ```
 
-## File: test/integration/InMemoryFlow/CrudCycle.test.ts
+## File: test/unit/Schema/ColumnHelpers.test.ts
 ```typescript
-import { describe, it, expect, beforeEach } from 'bun:test';
+import { describe, it, expect } from 'bun:test';
 import { konro } from '../../../src/index';
-import { testSchema } from '../../util';
-import path from 'path';
-import type { DbContext } from '../../../src/db';
-import type { DatabaseState } from '../../../src/types';
 
-describe('Integration > InMemoryFlow > CrudCycle', () => {
-  let db: DbContext<typeof testSchema>;
-  let state: DatabaseState<typeof testSchema>;
-
-  beforeEach(() => {
-    // Adapter is needed for context creation, but we won't use its I/O
-    const adapter = konro.createFileAdapter({
-      format: 'json',
-      single: { filepath: path.join(__dirname, 'test.db.json') },
+describe('Unit > Schema > ColumnHelpers', () => {
+  it('should create a valid ID column definition object when calling konro.id()', () => {
+    const idCol = konro.id();
+    expect(idCol).toEqual({
+      _type: 'column',
+      dataType: 'id',
+      options: { unique: true },
+      _tsType: 0,
     });
-    db = konro.createDatabase({
-      schema: testSchema,
-      adapter,
-    });
-    state = db.createEmptyState();
   });
 
-  it('should allow inserting a record and then immediately querying for it', () => {
-    const [newState, insertedUser] = db.insert(state, 'users', {
-      name: 'InMemory Alice',
-      email: 'alice@inmemory.com',
-      age: 30,
-      isActive: true,
+  it('should create a valid string column definition with no options', () => {
+    const stringCol = konro.string();
+    expect(stringCol).toEqual({
+      _type: 'column',
+      dataType: 'string',
+      options: undefined,
+      _tsType: '',
     });
-    expect(insertedUser.id).toBe(1);
-
-    const users = db.query(newState).from('users').all();
-    expect(users.length).toBe(1);
-    expect(users[0]).toEqual(insertedUser);
   });
 
-  it('should correctly chain mutation operations by passing the newState', () => {
-    // Insert user
-    const [stateAfterUserInsert, user] = db.insert(state, 'users', {
-      name: 'Chain User',
-      email: 'chain@test.com',
-      age: 40,
-      isActive: true,
+  it('should create a valid string column definition with all specified options', () => {
+    const defaultFn = () => 'default';
+    const stringCol = konro.string({
+      unique: true,
+      default: defaultFn,
+      min: 5,
+      max: 100,
+      format: 'email',
     });
-
-    // Insert post using the new state
-    const [stateAfterPostInsert, post] = db.insert(stateAfterUserInsert, 'posts', {
-      title: 'Chained Post',
-      content: '...',
-      authorId: user.id,
-      publishedAt: new Date(),
+    expect(stringCol).toEqual({
+      _type: 'column',
+      dataType: 'string',
+      options: {
+        unique: true,
+        default: defaultFn,
+        min: 5,
+        max: 100,
+        format: 'email',
+      },
+      _tsType: '',
     });
-
-    expect(stateAfterPostInsert.users.records.length).toBe(1);
-    expect(stateAfterPostInsert.posts.records.length).toBe(1);
-    expect(post.authorId).toBe(user.id);
   });
 
-  it('should update a record and verify the change in the returned newState', () => {
-    const [stateAfterInsert, user] = db.insert(state, 'users', {
-      name: 'Update Me',
-      email: 'update@test.com',
-      age: 50,
-      isActive: true,
+  it('should create a valid number column definition with no options', () => {
+    const numberCol = konro.number();
+    expect(numberCol).toEqual({
+      _type: 'column',
+      dataType: 'number',
+      options: undefined,
+      _tsType: 0,
     });
-
-    const [stateAfterUpdate, updatedUsers] = db.update(stateAfterInsert, 'users')
-      .set({ name: 'Updated Name' })
-      .where({ id: user.id });
-
-    expect(updatedUsers.length).toBe(1);
-    expect(updatedUsers[0]?.name).toBe('Updated Name');
-
-    const queriedUser = db.query(stateAfterUpdate).from('users').where({ id: user.id }).first();
-    expect(queriedUser?.name).toBe('Updated Name');
-    expect(stateAfterInsert.users.records[0]?.name).toBe('Update Me'); // Original state is untouched
   });
 
-  it('should delete a record and verify its absence in the returned newState', () => {
-    const [stateAfterInsert, user] = db.insert(state, 'users', {
-      name: 'Delete Me',
-      email: 'delete@test.com',
-      age: 60,
-      isActive: true,
+  it('should create a valid number column definition with all specified options', () => {
+    const numberCol = konro.number({
+      unique: false,
+      default: 0,
+      min: 0,
+      max: 1000,
+      type: 'integer',
     });
-
-    const [stateAfterDelete, deletedUsers] = db.delete(stateAfterInsert, 'users')
-      .where({ id: user.id });
-
-    expect(deletedUsers.length).toBe(1);
-    expect(deletedUsers[0]?.name).toBe('Delete Me');
-
-    const users = db.query(stateAfterDelete).from('users').all();
-    expect(users.length).toBe(0);
+    expect(numberCol).toEqual({
+      _type: 'column',
+      dataType: 'number',
+      options: {
+        unique: false,
+        default: 0,
+        min: 0,
+        max: 1000,
+        type: 'integer',
+      },
+      _tsType: 0,
+    });
   });
 
-  it('should correctly execute a query with a .with() clause on an in-memory state', () => {
-    const [s1, user] = db.insert(state, 'users', {
-      name: 'Relation User',
-      email: 'relation@test.com',
-      age: 35,
-      isActive: true,
+  it('should create a valid boolean column with no options', () => {
+    const boolCol = konro.boolean();
+    expect(boolCol).toEqual({
+      _type: 'column',
+      dataType: 'boolean',
+      options: undefined,
+      _tsType: false,
     });
-    const [s2, ] = db.insert(s1, 'posts', [
-        { title: 'Relational Post 1', content: '...', authorId: user.id, publishedAt: new Date() },
-        { title: 'Relational Post 2', content: '...', authorId: user.id, publishedAt: new Date() },
-    ]);
+  });
 
-    const userWithPosts = db.query(s2).from('users').where({ id: user.id }).with({ posts: true }).first();
+  it('should create a valid boolean column definition with a default value', () => {
+    const boolCol = konro.boolean({ default: false });
+    expect(boolCol).toEqual({
+      _type: 'column',
+      dataType: 'boolean',
+      options: { default: false },
+      _tsType: false,
+    });
+  });
 
-    expect(userWithPosts).toBeDefined();
-    expect(userWithPosts?.name).toBe('Relation User');
-    expect(userWithPosts?.posts).toBeInstanceOf(Array);
-    expect(userWithPosts?.posts?.length).toBe(2);
-    expect(userWithPosts?.posts?.[0]?.title).toBe('Relational Post 1');
+  it('should create a valid date column definition with no options', () => {
+    const dateCol = konro.date();
+    expect(dateCol).toEqual({
+      _type: 'column',
+      dataType: 'date',
+      options: undefined,
+      _tsType: expect.any(Date),
+    });
+  });
+
+  it('should create a valid date column definition with a default function', () => {
+    const defaultDateFn = () => new Date();
+    const dateCol = konro.date({ default: defaultDateFn });
+    expect(dateCol).toEqual({
+      _type: 'column',
+      dataType: 'date',
+      options: { default: defaultDateFn },
+      _tsType: expect.any(Date),
+    });
+    expect(dateCol.options?.default).toBe(defaultDateFn);
+  });
+
+  it('should create a valid string column with a literal default', () => {
+    const stringCol = konro.string({ default: 'hello' });
+    expect(stringCol).toEqual({
+      _type: 'column',
+      dataType: 'string',
+      options: { default: 'hello' },
+      _tsType: '',
+    });
+  });
+
+  it('should create a valid number column with a function default', () => {
+    const defaultFn = () => 42;
+    const numberCol = konro.number({ default: defaultFn });
+    expect(numberCol).toEqual({
+      _type: 'column',
+      dataType: 'number',
+      options: {
+        default: defaultFn,
+      },
+      _tsType: 0,
+    });
+    expect(numberCol.options?.default).toBe(defaultFn);
+  });
+
+  it('should create a valid boolean column with a function default', () => {
+    const defaultFn = () => true;
+    const boolCol = konro.boolean({ default: defaultFn });
+    expect(boolCol).toEqual({
+      _type: 'column',
+      dataType: 'boolean',
+      options: {
+        default: defaultFn,
+      },
+      _tsType: false,
+    });
+    expect(boolCol.options?.default).toBe(defaultFn);
+  });
+
+  it('should create a valid object column definition', () => {
+    const objCol = konro.object<{ meta: string }>();
+    expect(objCol).toMatchObject({
+      _type: 'column',
+      dataType: 'object',
+      options: undefined,
+    });
   });
 });
 ```
@@ -467,85 +516,66 @@ export const ensureTestDir = async () => {
 }
 ```
 
-## File: test/integration/Types/InferredTypes.test-d.ts
-```typescript
-import { describe, it } from 'bun:test';
-import { konro } from '../../../src/index';
-import { schemaDef } from '../../util';
-
-/**
- * NOTE: This is a type definition test file.
- * It is not meant to be run, but to be checked by `tsc`.
- * The presence of `// @ts-expect-error` comments indicates
- * that a TypeScript compilation error is expected on the next line.
- * If the error does not occur, `tsc` will fail, which is the desired behavior for this test.
- */
-describe('Integration > Types > InferredTypes', () => {
-  it('should pass type checks', () => {
-    const testSchema = konro.createSchema(schemaDef);
-    type User = typeof testSchema.types.users;
-
-    // Test 1: Inferred User type should have correct primitive and relational fields.
-    const user: User = {
-      id: 1,
-      name: 'Alice',
-      email: 'alice@example.com',
-      age: 30,
-      isActive: true,
-      posts: [{
-        id: 1,
-        title: 'Post 1',
-        content: '...',
-        authorId: 1,
-        publishedAt: new Date(),
-      }],
-      profile: null,
-    };
-
-        // This should be valid
-        user.name; // Accessing for type check
-    const db = konro.createDatabase({ schema: testSchema, adapter: {} as any });
-    const state = db.createEmptyState();
-
-    // Test 2: Should cause a TS error if a non-existent field is used in a where clause.
-    // @ts-expect-error - 'nonExistentField' does not exist on type 'User'.
-    db.query(state).from('users').where({ nonExistentField: 'value' });
-
-    // This should be valid
-    db.query(state).from('users').where({ name: 'Alice' });
-
-    // Test 3: Should cause a TS error if a wrong type is passed to db.insert().
-    // @ts-expect-error - 'age' should be a number, not a string.
-    db.insert(state, 'users', { name: 'Bob', email: 'bob@test.com', age: 'twenty-five' });
-
-    // This should be valid - using type assertion for test-only code
-    // @ts-ignore - This is a type test only, not runtime code
-    db.insert(state, 'users', { name: 'Bob', email: 'bob@test.com', age: 25 });
-
-    // Test 4: Nested .with clause should be typed correctly
-    db.query(state).from('users').with({
-      posts: {
-        where: (post) => post.title.startsWith('A') // post is typed as Post
-      }
-    }).first();
-
-    // @ts-expect-error - 'nonExistentRelation' is not a valid relation on 'users'
-    db.query(state).from('users').with({ nonExistentRelation: true });
-
-    // Test 5: A query without .with() should return the base type, without relations.
-    const baseUser = db.query(state).from('users').where({ id: 1 }).first();
-    // This should be valid
-    baseUser?.name;
-    // @ts-expect-error - 'posts' does not exist on base user type, as .with() was not used.
-    baseUser?.posts;
-
-    // Test 6: A query with .with() should return the relations, which are now accessible.
-    const userWithPosts = db.query(state).from('users').where({ id: 1 }).with({ posts: true }).first();
-    userWithPosts?.posts; // This should be valid and typed as Post[] | undefined
-    
-    // userWithPosts?.posts?.[0]?.author; 
-  });
-});
+## File: package.json
+```json
+{
+  "name": "konro",
+  "version": "0.1.1",
+  "description": "A type-safe, functional micro-ORM for JSON/YAML files.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/relaycoder/konro.git"
+  },
+  "keywords": [
+    "orm",
+    "json",
+    "yaml",
+    "database",
+    "typescript",
+    "local-first",
+    "immutable",
+    "functional"
+  ],
+  "author": "relaycoder",
+  "license": "MIT",
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/js-yaml": "^4.0.9",
+    "@typescript-eslint/eslint-plugin": "^8.36.0",
+    "@typescript-eslint/parser": "^8.36.0",
+    "eslint": "^9.30.1",
+    "tsup": "^8.5.0",
+    "typescript": "^5.5.4"
+  },
+  "peerDependencies": {
+    "js-yaml": "^4.1.0",
+    "typescript": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "js-yaml": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "prepublishOnly": "npm run build"
+  }
+}
 ```
 
 ## File: src/adapter.ts
@@ -585,7 +615,10 @@ export type FileAdapterOptions = {
   mode?: 'in-memory' | 'on-demand';
 } & (SingleFileStrategy | MultiFileStrategy);
 
-export const createFileAdapter = (options: FileAdapterOptions): FileStorageAdapter => {
+export function createFileAdapter(options: FileAdapterOptions & { mode: 'on-demand' }): FileStorageAdapter & { mode: 'on-demand' };
+export function createFileAdapter(options: FileAdapterOptions & { mode?: 'in-memory' | undefined }): FileStorageAdapter & { mode: 'in-memory' };
+export function createFileAdapter(options: FileAdapterOptions): FileStorageAdapter;
+export function createFileAdapter(options: FileAdapterOptions): FileStorageAdapter {
   const serializer = getSerializer(options.format);
   const fileExtension = `.${options.format}`;
   const fs = options.fs ?? defaultFsProvider;
@@ -653,77 +686,15 @@ export const createFileAdapter = (options: FileAdapterOptions): FileStorageAdapt
   };
 
   if (options.single) {
-    return { ...adapterInternals, read: readSingle, write: writeSingle };
+    return { ...adapterInternals, read: readSingle, write: writeSingle } as FileStorageAdapter;
   } else {
-    return { ...adapterInternals, read: readMulti, write: writeMulti };
-  }
-};
-```
-
-## File: package.json
-```json
-{
-  "name": "konro",
-  "version": "0.1.1",
-  "description": "A type-safe, functional micro-ORM for JSON/YAML files.",
-  "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.mjs",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
-    }
-  },
-  "files": [
-    "dist"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/relaycoder/konro.git"
-  },
-  "keywords": [
-    "orm",
-    "json",
-    "yaml",
-    "database",
-    "typescript",
-    "local-first",
-    "immutable",
-    "functional"
-  ],
-  "author": "relaycoder",
-  "license": "MIT",
-  "devDependencies": {
-    "@types/bun": "latest",
-    "@types/js-yaml": "^4.0.9",
-    "@typescript-eslint/eslint-plugin": "^8.36.0",
-    "@typescript-eslint/parser": "^8.36.0",
-    "eslint": "^9.30.1",
-    "tsup": "^8.5.0",
-    "typescript": "^5.5.4"
-  },
-  "peerDependencies": {
-    "js-yaml": "^4.1.0",
-    "typescript": "^5.0.0"
-  },
-  "peerDependenciesMeta": {
-    "js-yaml": {
-      "optional": true
-    }
-  },
-  "scripts": {
-    "lint": "eslint .",
-    "build": "tsup",
-    "dev": "tsup --watch",
-    "prepublishOnly": "npm run build"
-  }
-}
+    return { ...adapterInternals, read: readMulti, write: writeMulti } as FileStorageAdapter;
+  }};
 ```
 
 ## File: src/operations.ts
 ```typescript
+import { randomUUID } from 'crypto';
 import { DatabaseState, KRecord } from './types';
 import { KonroSchema, RelationDefinition, ColumnDefinition, AggregationDefinition } from './schema';
 import { KonroError, KonroValidationError } from './utils/error.util';
@@ -975,8 +946,20 @@ export const _insertImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
     for (const colName in tableSchema) {
       const colDef = tableSchema[colName];
       if (colDef.dataType === 'id') {
-        tableState.meta.lastId++;
-        newRecord[colName] = tableState.meta.lastId;
+        if (newRecord[colName] === undefined) {
+          // Generate new PK if not provided
+          if (colDef.options?._pk_strategy === 'uuid') {
+            newRecord[colName] = randomUUID();
+          } else { // 'auto-increment' or legacy undefined strategy
+            tableState.meta.lastId++;
+            newRecord[colName] = tableState.meta.lastId;
+          }
+        } else {
+          // If user provided an ID for an auto-increment table, update lastId to avoid future collisions.
+          if (colDef.options?._pk_strategy !== 'uuid' && typeof newRecord[colName] === 'number') {
+            tableState.meta.lastId = Math.max(tableState.meta.lastId, newRecord[colName] as number);
+          }
+        }
       }
       if (newRecord[colName] === undefined && colDef.options?.default !== undefined) {
         newRecord[colName] = typeof colDef.options.default === 'function' ? colDef.options.default() : colDef.options.default;
@@ -1247,13 +1230,13 @@ interface OnDemandQueryBuilder<S extends KonroSchema<any, any>> {
   from<T extends keyof S['tables']>(tableName: T): OnDemandChainedQueryBuilder<S, T, S['base'][T]>;
 }
 
-interface OnDemandUpdateBuilder<S extends KonroSchema<any, any>, TBase, TCreate> {
+interface OnDemandUpdateBuilder<TBase, TCreate> {
   set(data: Partial<TCreate>): {
     where(predicate: Partial<TBase> | ((record: TBase) => boolean)): Promise<TBase[]>;
   };
 }
 
-interface OnDemandDeleteBuilder<S extends KonroSchema<any, any>, TBase> {
+interface OnDemandDeleteBuilder<TBase> {
   where(predicate: Partial<TBase> | ((record: TBase) => boolean)): Promise<TBase[]>;
 }
 
@@ -1267,8 +1250,8 @@ export interface OnDemandDbContext<S extends KonroSchema<any, any>> {
   query(): OnDemandQueryBuilder<S>;
   insert<T extends keyof S['tables']>(tableName: T, values: S['create'][T]): Promise<S['base'][T]>;
   insert<T extends keyof S['tables']>(tableName: T, values: Readonly<S['create'][T]>[]): Promise<S['base'][T][]>;
-  update<T extends keyof S['tables']>(tableName: T): OnDemandUpdateBuilder<S, S['base'][T], S['create'][T]>;
-  delete<T extends keyof S['tables']>(tableName: T): OnDemandDeleteBuilder<S, S['base'][T]>;
+  update<T extends keyof S['tables']>(tableName: T): OnDemandUpdateBuilder<S['base'][T], S['create'][T]>;
+  delete<T extends keyof S['tables']>(tableName: T): OnDemandDeleteBuilder<S['base'][T]>;
 }
 
 // --- DbContext Union Type ---
@@ -1395,7 +1378,10 @@ function createOnDemandDbContext<S extends KonroSchema<any, any>>(
       const state = await getFullState(); // Read only the tables involved later
       const valsArray = Array.isArray(values) ? values : [values];
       const [newState, inserted] = _insertImpl(state, schema, tableName as string, valsArray as KRecord[]);
-      await writeTable(tableName as string, newState[tableName as string]);
+      const tableState = newState[tableName as string];
+      if (tableState) {
+        await writeTable(tableName as string, tableState);
+      }
       const result = Array.isArray(values) ? inserted : inserted[0];
       return result as any;
     }) as OnDemandDbContext<S>['insert'],
@@ -1429,25 +1415,31 @@ function createOnDemandDbContext<S extends KonroSchema<any, any>>(
       },
     }),
 
-    update: <T extends keyof S['tables']>(tableName: T): OnDemandUpdateBuilder<S, S['base'][T], S['create'][T]> => ({
-      set: (data) => ({
-        where: async (predicate) => {
+    update: <T extends keyof S['tables']>(tableName: T): OnDemandUpdateBuilder<S['base'][T], S['create'][T]> => ({
+      set: (data: Partial<S['create'][T]>) => ({
+        where: async (predicate: Partial<S['base'][T]> | ((record: S['base'][T]) => boolean)) => {
           const state = await getFullState();
           const [newState, updatedRecords] = _updateImpl(state, schema, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate as any));
           if (updatedRecords.length > 0) {
-            await writeTable(tableName as string, newState[tableName as string]);
+            const tableState = newState[tableName as string];
+            if (tableState) {
+              await writeTable(tableName as string, tableState);
+            }
           }
           return updatedRecords as S['base'][T][];
         },
       }),
     }),
 
-    delete: <T extends keyof S['tables']>(tableName: T): OnDemandDeleteBuilder<S, S['base'][T]> => ({
-      where: async (predicate) => {
+    delete: <T extends keyof S['tables']>(tableName: T): OnDemandDeleteBuilder<S['base'][T]> => ({
+      where: async (predicate: Partial<S['base'][T]> | ((record: S['base'][T]) => boolean)) => {
         const state = await getFullState();
         const [newState, deletedRecords] = _deleteImpl(state, tableName as string, normalizePredicate(predicate as any));
         if (deletedRecords.length > 0) {
-          await writeTable(tableName as string, newState[tableName as string]);
+          const tableState = newState[tableName as string];
+          if (tableState) {
+            await writeTable(tableName as string, tableState);
+          }
         }
         return deletedRecords as S['base'][T][];
       },
@@ -1456,12 +1448,12 @@ function createOnDemandDbContext<S extends KonroSchema<any, any>>(
 }
 
 
-export function createDatabase<S extends KonroSchema<any, any>>(
-  options: { schema: S; adapter: { mode: 'on-demand' } & FileStorageAdapter }
-): OnDemandDbContext<S>;
-export function createDatabase<S extends KonroSchema<any, any>>(
-  options: { schema: S; adapter: StorageAdapter }
-): InMemoryDbContext<S>;
+export function createDatabase<
+  S extends KonroSchema<any, any>,
+  TAdapter extends StorageAdapter,
+>(
+  options: { schema: S; adapter: TAdapter }
+): TAdapter['mode'] extends 'on-demand' ? OnDemandDbContext<S> : InMemoryDbContext<S>;
 export function createDatabase<S extends KonroSchema<any, any>>(
   options: { schema: S; adapter: StorageAdapter }
 ): DbContext<S> {
@@ -1645,8 +1637,10 @@ const createColumn = <T>(dataType: ColumnDefinition<T>['dataType'], options: obj
   _tsType: tsType,
 });
 
-/** A managed, auto-incrementing integer primary key. */
-export const id = () => createColumn<number>('id', { unique: true }, 0);
+/** A managed, auto-incrementing integer primary key. This is the default strategy. */
+export const id = () => createColumn<number>('id', { unique: true, _pk_strategy: 'auto-increment' }, 0);
+/** A managed, universally unique identifier (UUID) primary key. Stored as a string. */
+export const uuid = () => createColumn<string>('id', { unique: true, _pk_strategy: 'uuid' }, '');
 /** A string column with optional validation. */
 export const string = (options?: { unique?: boolean; default?: string | (() => string); min?: number; max?: number; format?: 'email' | 'uuid' | 'url' }) => createColumn<string>('string', options, '');
 /** A number column with optional validation. */

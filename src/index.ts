@@ -1,6 +1,6 @@
 import { createDatabase } from './db';
 import { createFileAdapter } from './adapter';
-import { createSchema, id, string, number, boolean, date, object, one, many, count, sum, avg, min, max } from './schema';
+import { createSchema, id, uuid, string, number, boolean, date, object, one, many, count, sum, avg, min, max } from './schema';
 
 /**
  * The main Konro object, providing access to all core functionalities
@@ -24,6 +24,7 @@ export const konro = {
   createFileAdapter,
   // --- Column Definition Helpers ---
   id,
+  uuid,
   string,
   number,
   boolean,

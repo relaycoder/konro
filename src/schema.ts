@@ -165,8 +165,10 @@ const createColumn = <T>(dataType: ColumnDefinition<T>['dataType'], options: obj
   _tsType: tsType,
 });
 
-/** A managed, auto-incrementing integer primary key. */
-export const id = () => createColumn<number>('id', { unique: true }, 0);
+/** A managed, auto-incrementing integer primary key. This is the default strategy. */
+export const id = () => createColumn<number>('id', { unique: true, _pk_strategy: 'auto-increment' }, 0);
+/** A managed, universally unique identifier (UUID) primary key. Stored as a string. */
+export const uuid = () => createColumn<string>('id', { unique: true, _pk_strategy: 'uuid' }, '');
 /** A string column with optional validation. */
 export const string = (options?: { unique?: boolean; default?: string | (() => string); min?: number; max?: number; format?: 'email' | 'uuid' | 'url' }) => createColumn<string>('string', options, '');
 /** A number column with optional validation. */

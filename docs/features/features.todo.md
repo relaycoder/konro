@@ -10,7 +10,7 @@ beside yaml and json, it also do with csv and xlsx. they should only support whi
 
 ####
 
-update readme for on demand feature
+update readme for on demand feature, csv xlsx feature
 
 ####
 

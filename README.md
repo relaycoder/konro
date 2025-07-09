@@ -1,11 +1,11 @@
-# Konro: The Type-Safe, Functional ORM for JSON/YAML
+# Konro: The Type-Safe, Functional ORM for Your Local Files
 
 <p align="center">
-  <img src="https://i.imgur.com/6s2uA4Z.jpeg" alt="Konro Logo - A bowl of soup representing the database state, with spices (functions) being added" width="200" />
+  <img src="https://i.imgur.com/6s2uA4Z.jpeg" alt="Konro Logo - A bowl of soup representing the database state, with spices (functions) being added" width="400" />
 </p>
 
 <p align="center">
-  <strong>Slow-simmer your data. A pure, functional, and type-safe "spice rack" for your JSON or YAML "broth".</strong>
+  <strong>Slow-simmer your data. A pure, functional, and type-safe "spice rack" for your JSON, YAML, CSV, or XLSX "broth".</strong>
 </p>
 
 <p align="center">
@@ -18,7 +18,7 @@
 
 ---
 
-Konro is a new kind of "micro-ORM" for JavaScript and TypeScript. It offers the safety and developer experience of a full-scale, relational database ORM, but for local **JSON or YAML files**. It is designed from the ground up to be **type-safe, immutable, relational, and ergonomic,** making it the perfect data persistence layer for local-first apps, CLIs, and small servers.
+Konro is a new kind of "micro-ORM" for JavaScript and TypeScript. It offers the safety and developer experience of a full-scale, relational database ORM, but for local **JSON, YAML, CSV, or XLSX files**. It is designed from the ground up to be **type-safe, immutable, relational, and ergonomic,** making it the perfect data persistence layer for local-first apps, CLIs, and small servers.
 
 ## Table of Contents
 
@@ -34,21 +34,22 @@ Konro is a new kind of "micro-ORM" for JavaScript and TypeScript. It offers the 
     *   [Inferring Static Types: The Magic](#inferring-static-types-the-magic)
 7.  [**Pillar II: The Kitchen (Database Context)**](#7-pillar-ii-the-kitchen-database-context)
     *   [Choosing a Storage Adapter](#choosing-a-storage-adapter)
+    *   [Data Access Modes: `in-memory` vs `on-demand`](#data-access-modes-in-memory-vs-on-demand)
     *   [The `konro.createDatabase` Function](#the-konrocreatedatabase-function)
 8.  [**Pillar III: Cooking (The Fluent API)**](#8-pillar-iii-cooking-the-fluent-api)
-    *   [The Transactional Workflow: Read, Mutate, Write](#the-transactional-workflow-read-mutate-write)
+    *   [Two API Styles: In-Memory vs. On-Demand](#two-api-styles-in-memory-vs-on-demand)
     *   [Reading Data with `db.query()`](#reading-data-with-dbquery)
     *   [Advanced Queries with `.with()`](#advanced-queries-with-with)
-    *   [Inserting Data with `db.insert()`](#inserting-data-with-dbinsert)
-    *   [Updating Data with `db.update()`](#updating-data-with-dbupdate)
-    *   [Deleting Data with `db.delete()`](#deleting-data-with-dbdelete)
+    *   [Aggregating Data](#aggregating-data)
+    *   [Writing Data: `insert`, `update`, `delete`](#writing-data-insert-update-delete)
 9.  [**Advanced Concepts & Patterns**](#9-advanced-concepts--patterns)
     *   [Testing Your Logic](#testing-your-logic)
     *   [Performance Considerations](#performance-considerations)
 10. [**API Reference Cheatsheet**](#10-api-reference-cheatsheet)
-11. [**Comparison to Other Libraries**](#11-comparison-to-other-libraries)
-12. [**Contributing**](#12-contributing)
-13. [**License**](#13-license)
+11. [**Roadmap**](#11-roadmap)
+12. [**Comparison to Other Libraries**](#12-comparison-to-other-libraries)
+13. [**Contributing**](#13-contributing)
+14. [**License**](#14-license)
 
 ---
 
@@ -56,7 +57,7 @@ Konro is a new kind of "micro-ORM" for JavaScript and TypeScript. It offers the 
 
 Konro is inspired by the art of Indonesian cooking, where a rich soup or `Konro` is made by carefully combining a base broth with a precise recipe and a collection of spices. Konro treats your data with the same philosophy.
 
-*   **The Broth (Your Data):** Your database state is a plain, passive JSON object. It holds no logic.
+*   **The Broth (Your Data):** Your database state is a plain, passive file (JSON, YAML, CSV, etc.). It holds no logic.
 *   **The Recipe (Your Schema):** You define a schema that acts as a recipe, describing your data's structure, types, and relationships.
 *   **The Spices (Pure Functions):** Konro provides a set of pure, immutable functions that act as spices. They take the broth and transform it, always returning a *new, updated broth*, never changing the original.
 *   **The Fluent API (Your Guided Hand):** Konro provides an ergonomic, chainable API that guides you through the process of combining these elements, making the entire cooking process safe, predictable, and enjoyable.
@@ -65,8 +66,9 @@ Konro is inspired by the art of Indonesian cooking, where a rich soup or `Konro`
 
 *   **Type-First, Not Schema-First:** You don't write a schema to get types. You write a schema *as* types. Your schema definition becomes your single source of truth for both runtime validation and static TypeScript types.
 *   **Stateless Core, Stateful Feel:** The internal engine is a collection of pure, stateless functions (`(state, args) => newState`). The user-facing API is a fluent, chainable "query builder" that feels intuitive and stateful, giving you the best of both worlds.
-*   **Immutable by Default:** Data is never mutated. Every `insert`, `update`, or `delete` operation is an explicit API call that returns a `[newState, result]` tuple. This eliminates side effects and makes state management predictable and safe.
+*   **Immutable by Default:** In its primary `in-memory` mode, data is never mutated. Every `insert`, `update`, or `delete` operation is an explicit API call that returns a `[newState, result]` tuple. This eliminates side effects and makes state management predictable and safe.
 *   **Relational at Heart:** Define `one-to-one`, `one-to-many`, and `many-to-one` relationships directly in your schema. Eager-load related data with a powerful and fully-typed `.with()` clause, where TypeScript precisely infers the shape of the result based on your query's structure.
+*   **Scales with You:** Start with a simple, atomic JSON file (`in-memory` mode). As your data grows, switch to `on-demand` mode to reduce memory usage, reading from the filesystem only when needed.
 
 ## 3. When to Use Konro (and When Not To)
 
@@ -79,8 +81,8 @@ Konro is inspired by the art of Indonesian cooking, where a rich soup or `Konro`
 
 ❌ **Consider other solutions if you need:**
 
-*   **High-Concurrency Writes:** Konro's default adapters are not designed for environments where many processes need to write to the database simultaneously at high frequency.
-*   **Gigabyte-Scale Datasets:** Konro operates on data in memory, making it unsuitable for datasets that cannot comfortably fit into RAM.
+*   **High-Concurrency Writes:** Konro's default file-based adapters are not designed for environments where many processes need to write to the database simultaneously at high frequency.
+*   **Extreme Performance at Scale:** While `on-demand` mode helps with memory, complex relational queries still load data into memory. For gigabyte-scale relational processing, a dedicated database server is more appropriate.
 *   **Distributed Systems:** Konro is a single-node database solution by design.
 
 ---
@@ -89,8 +91,19 @@ Konro is inspired by the art of Indonesian cooking, where a rich soup or `Konro`
 
 ```bash
 npm install konro
-# If using YAML files, you will also need to install `js-yaml`
-# npm install js-yaml
+```
+
+Konro has **optional** peer dependencies for different file formats. Install the ones you need:
+
+```bash
+# For YAML file support
+npm install js-yaml
+
+# For CSV file support
+npm install papaparse
+
+# For XLSX (Excel) file support
+npm install xlsx
 ```
 
 ---
@@ -135,23 +148,18 @@ export type Post = typeof blogSchema.types.posts;
 ```
 
 **Step 2: Prepare the Kitchen (`src/db.ts`)**
-Create a database context that is pre-configured with your schema and a storage adapter.
+Create a database context that is pre-configured with your schema and a storage adapter. This example uses the default `in-memory` mode.
 
 ```typescript
 import { konro, createFileAdapter } from 'konro';
 import { blogSchema } from './schema';
 
-// Example: Use a multi-file YAML adapter to create 'users.yaml' and 'posts.yaml'.
+// Use a multi-file YAML adapter to create 'users.yaml' and 'posts.yaml'.
 const adapter = createFileAdapter({
-  format: 'yaml', // Specify the file format: 'json' or 'yaml'
+  format: 'yaml', // 'json', 'yaml', 'csv', 'xlsx'
   multi: { dir: './data/yaml_db' },
+  // mode: 'in-memory' is the default
 });
-
-// You could also use a single JSON file:
-// const adapter = createFileAdapter({
-//   format: 'json',
-//   single: { filepath: './data/database.json' }
-// });
 
 // Create the db context. This is your main interface to Konro.
 export const db = konro.createDatabase({
@@ -168,7 +176,7 @@ import { db } from './db';
 import type { User } from './schema';
 
 async function main() {
-  // 1. READ state from disk.
+  // 1. READ state from disk. This loads the entire database into memory.
   let state = await db.read();
   console.log('Database state loaded.');
 
@@ -189,7 +197,7 @@ async function main() {
 
   // 3. UPDATE a record using the fluent API.
   let updatedPosts; // Type inferred as Post[]
-  [state, updatedPosts] = await db.update(state, 'posts')
+  [state, updatedPosts] = db.update(state, 'posts')
     .set({ published: true })
     .where({ id: 1 });
   console.log('Post published:', updatedPosts[0]);
@@ -198,9 +206,8 @@ async function main() {
   await db.write(state);
   console.log('Database saved!');
 
-  // 5. QUERY the data with the fluent API.
-  const authorWithPosts = await db.query(state)
-    .select()
+  // 5. QUERY the data. Note that `db.query` also takes the state.
+  const authorWithPosts = db.query(state)
     .from('users')
     .where({ id: newUser.id })
     .with({ posts: true }) // Eager-load the 'posts' relation
@@ -212,6 +219,7 @@ async function main() {
 
 main().catch(console.error);
 ```
+*(For the alternative `on-demand` API style, see [Pillar III](#8-pillar-iii-cooking-the-fluent-api)).*
 
 ---
 
@@ -230,10 +238,12 @@ Under the `tables` key, you define each table and its columns using Konro's help
 | Helper             | Description & Options                                                                  |
 | ------------------ | -------------------------------------------------------------------------------------- |
 | `konro.id()`       | A managed, auto-incrementing integer primary key.                                      |
+| `konro.uuid()`     | A managed, UUID string primary key.                                                    |
 | `konro.string()`   | `{ unique, default, min, max, format: 'email' | 'uuid' | 'url' }`                        |
 | `konro.number()`   | `{ unique, default, min, max, type: 'integer' }`                                       |
 | `konro.boolean()`  | `{ default }`                                                                          |
 | `konro.date()`     | `{ default }` (e.g., `() => new Date()`). Stored as an ISO string.                      |
+| `konro.object()`   | Stores an arbitrary JSON object.                                                       |
 
 ### Defining Relationships
 
@@ -266,140 +276,135 @@ The database context is a pre-configured object that makes interacting with your
 
 ### Choosing a Storage Adapter
 
-Konro ships with a flexible file adapter supporting both JSON and YAML. You configure it when creating your `db` context.
+Konro ships with a flexible file adapter supporting multiple formats and strategies. You configure it when creating your `db` context using `createFileAdapter(options)`.
 
-*   **`createFileAdapter(options)`**: The factory function for all file-based adapters.
-    *   `format`: `'json'` or `'yaml'` (required).
-    *   `single`: `{ filepath: string }`. Stores the entire database state in one monolithic file. Simple and atomic.
-    *   `multi`: `{ dir: string }`. Stores each table in its own file within a directory. Great for organization and easy inspection of individual table data.
+*   `format`: `'json' | 'yaml' | 'csv' | 'xlsx'` (required).
+*   `single`: `{ filepath: string }`. Stores the entire database state in one monolithic file. Simple and atomic. **Only works with `json` and `yaml` in `in-memory` mode.**
+*   `multi`: `{ dir: string }`. Stores each table in its own file within a directory. Great for organization and required for `on-demand` mode.
+*   `mode`: `'in-memory'` (default) or `'on-demand'`. This is a crucial choice that affects performance and the API style.
+
+### Data Access Modes: `in-memory` vs `on-demand`
+
+| Mode           | How it Works                                                                                                    | API Style                                            | Best For                                                                  |
+| -------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- | ------------------------------------------------------------------------- |
+| **`in-memory`** (Default) | On `db.read()`, the entire database is loaded into a `state` object. All operations are pure functions on this object. `db.write(state)` saves it back. | Immutable: `(state, args) => [newState, result]` | Small-to-medium datasets. Fast queries. Guaranteed atomic writes.           |
+| **`on-demand`** | Each operation (`insert`, `query`, `update`, etc.) reads from and writes to the filesystem directly. There is no manual `state` object to manage. | Async/Stateless: `async (args) => result`    | Larger datasets where memory is a concern. More granular I/O operations. |
+
+**Important Constraints:**
+*   `on-demand` mode **requires** the `multi: { dir: string }` file strategy.
+*   `csv` and `xlsx` formats **require** `on-demand` mode. This is because they are non-relational by nature and store no database-level metadata.
 
 ### The `konro.createDatabase` Function
 
-This function bundles your schema and adapter into a single, convenient `db` object. This object holds all the methods you'll need, like `read`, `write`, `query`, `insert`, etc.
+This function bundles your schema and adapter into a single, convenient `db` object. This object holds all the methods you'll need, and its API will automatically adapt based on the `mode` you selected in your adapter.
 
 ---
 
 ## 8. Pillar III: Cooking (The Fluent API)
 
-Konro provides a fluent, chainable API for building and executing queries.
+Konro provides a fluent, chainable API for building and executing queries. The exact methods change slightly depending on your chosen access mode.
 
-### The Transactional Workflow: Read, Mutate, Write
+### Two API Styles: In-Memory vs. On-Demand
 
-Because Konro is immutable, every data-modifying operation follows a clear, safe pattern:
+#### In-Memory (`in-memory`)
+You explicitly manage the state. This is a pure, functional approach.
+1.  **Read:** `let state = await db.read();`
+2.  **Mutate:** `[state, result] = db.insert(state, ...);`
+3.  **Write:** `await db.write(state);`
 
-1.  **Read:** Load the current state from disk: `let state = await db.read();`
-2.  **Mutate:** Apply one or more pure operations, re-assigning the state variable each time: `[state, result] = db.insert(state, ...);`
-3.  **Write:** Persist the final, new state back to disk: `await db.write(state);`
-
-This pattern guarantees that your data on disk is always in a consistent state. A transaction is either fully completed or not at all.
+#### On-Demand (`on-demand`)
+The state is managed internally. Every operation is `async` and handles its own I/O.
+```typescript
+// No state management needed. Each call is a transaction.
+const newUser = await db.insert('users', { name: 'Chef Juna' });
+const updated = await db.update('posts').set({ published: true }).where({ id: 1 });
+const results = await db.query().from('users').all();
+```
 
 ### Reading Data with `db.query()`
 
-The `db.query(state)` method is the entry point for all read operations.
+The query builder is almost identical in both modes, but terminal methods like `.all()` and `.first()` are **async** in `on-demand` mode.
 
 ```typescript
-const results = await db.query(state)
+// In-Memory
+const users = db.query(state).from('users').all();
+
+// On-Demand
+const users = await db.query().from('users').all();
+```
+The available methods are:
+```typescript
+db.query(state?) // state is omitted in on-demand mode
   .select(fields?)   // Optional: Pick specific fields. Fully typed!
   .from(tableName)  // Required: The table to query, e.g., 'users'
   .where(predicate) // Optional: Filter records.
   .with(relations)  // Optional: Eager-load relations, e.g., { posts: true }
   .limit(number)    // Optional: Limit the number of results
   .offset(number)   // Optional: Skip records for pagination
-  .all();           // Terminator: Returns Promise<Array<T>>
+  .all();           // Returns T[] or Promise<T[]>
 
-const single = await db.query(state).from('users').where({ id: 1 }).first(); // Returns Promise<T | null>
+db.query(state?).from('users').where({ id: 1 }).first(); // Returns T | null or Promise<T | null>
 ```
 
 ### Advanced Queries with `.with()`
 
-The `.with()` clause is not just for loading direct relations. It's a powerful tool for building complex, nested queries in a type-safe way. Konro's type inference engine precisely understands your `.with()` clause and constructs an exact return type, so you can't accidentally access data you didn't ask for.
+The `.with()` clause is a powerful tool for building complex, nested queries in a type-safe way. It works identically in both modes. Konro's type inference engine precisely understands your `.with()` clause and constructs an exact return type, so you can't accidentally access data you didn't ask for.
 
 **1. Filtering Related Records**
-
-You can provide a `where` clause to filter the records returned by a relation.
-
 ```typescript
-const userWithSpecificPosts = await db.query(state)
+const userWithPublishedPosts = await db.query() // on-demand example
   .from('users')
   .where({ id: 1 })
   .with({
     posts: {
-      where: (post) => post.title.includes('Special')
+      where: (post) => post.published === true
     }
   })
   .first();
-
-// The type of `userWithSpecificPosts.posts` is `Post[]`,
-// but it will only contain posts whose title includes 'Special'.
 ```
 
 **2. Selecting Specific Fields from Relations**
-
-To save memory or simplify your result object, you can use `select` to pick specific columns from a related table.
-
 ```typescript
-const userWithPostTitles = await db.query(state)
+const userWithPostTitles = await db.query() // on-demand example
   .from('users')
   .where({ id: 1 })
   .with({
     posts: {
       select: {
-        postTitle: blogSchema.tables.posts.title,
-        isPublished: blogSchema.tables.posts.published
+        title: blogSchema.tables.posts.title,
       }
     }
   })
   .first();
 
-// The type of `userWithPostTitles.posts` is now:
-// { postTitle: string; isPublished: boolean; }[]
-// It's fully typed, and you can't access `post.id` for example.
+// The type of `userWithPostTitles.posts` is now: { title: string; }[]
 ```
 
 **3. Nested Eager-Loading**
-
-You can nest `.with()` clauses to load relations of relations. For example, you can query for posts, and for each post, load its `author`, and for that `author`, load all of *their* `posts`.
-
 ```typescript
-const postsWithDeepAuthors = await db.query(state)
+const postsWithAuthorsAndTheirPosts = await db.query()
   .from('posts')
   .with({
-    author: { // `author` is a 'one' relation on posts
-      with: { // from the author (a user), load their 'many' posts relation
-        posts: true 
+    author: {       // Load post's author
+      with: {       // Then, from that author...
+        posts: true // ...load all of their posts
       }
     }
   })
   .all();
-
-// TypeScript knows that `postsWithDeepAuthors[0].author.posts` is `Post[]`.
 ```
 
 **4. `select` and nested `with` are Mutually Exclusive**
 
-Within a relation's option object, you can either use `select` to shape the output or `with` to load deeper relations, but not both. This design choice keeps query intent clear and predictable.
+Within a relation's option object, you can either use `select` to shape the output or `with` to load deeper relations, but not both.
+
+### Aggregating Data
+
+The `.aggregate()` terminator computes calculations like `count`, `sum`, `avg`, `min`, and `max`. It is also `async` in `on-demand` mode.
 
 ```typescript
-// VALID: Select fields from the author
-.with({ author: { select: { name: blogSchema.tables.users.name } } })
-
-// VALID: Load the author's other posts
-.with({ author: { with: { posts: true } } })
-
-// INVALID: This will cause a TypeScript error.
-.with({ author: {
-    select: { name: blogSchema.tables.users.name },
-    with: { posts: true }
-  }
-})
-```
-
-### Aggregating Data with `db.query()`
-
-The same query chain can be used to perform calculations like `count`, `sum`, `avg`, `min`, and `max`.
-
-```typescript
-const stats = await db.query(state)
+// On-demand example
+const stats = await db.query()
   .from('posts')
   .where({ published: true })
   .aggregate({
@@ -408,39 +413,18 @@ const stats = await db.query(state)
     averageViews: konro.avg('views'),
   });
 
-console.log(`Published posts: ${stats.postCount}, with an average of ${stats.averageViews} views.`);
+// stats is: { postCount: number; averageViews: number | null }
 ```
 
-### Inserting Data with `db.insert()`
+### Writing Data: `insert`, `update`, `delete`
 
-`db.insert` is a direct, pure function that validates data against your schema before inserting.
+Write operations clearly show the difference between the two modes.
 
-```typescript
-const [newState, newUser] = db.insert(state, 'users', {
-  name: 'Valid Name',
-  email: 'valid@email.com',
-});
-// Throws a runtime error if data is invalid!
-```
-
-### Updating Data with `db.update()`
-
-`db.update(state, tableName)` returns a chainable builder.
-
-```typescript
-const [newState, updatedPosts] = await db.update(state, 'posts')
-  .set({ published: true, title: 'New Title' }) // Data to change
-  .where({ id: 1 }); // Required: a predicate to execute the update
-```
-
-### Deleting Data with `db.delete()`
-
-`db.delete(state, tableName)` also returns a chainable builder.
-
-```typescript
-const [newState, deletedUsers] = await db.delete(state, 'users')
-  .where(user => user.email.endsWith('@spam.com')); // Required predicate
-```
+| Operation | In-Memory (`(state, ...args) => [newState, result]`)                                | On-Demand (`(...args) => Promise<result>`)                                           |
+| --------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `insert`  | `const [newState, newUser] = db.insert(state, 'users', { ... });`                    | `const newUser = await db.insert('users', { ... });`                                |
+| `update`  | `const [newState, updated] = db.update(state, 'users').set({..}).where({..});`       | `const updated = await db.update('users').set({..}).where({..});`                    |
+| `delete`  | `const [newState, deleted] = db.delete(state, 'users').where({..});`                 | `const deleted = await db.delete('users').where({..});`                              |
 
 ---
 
@@ -448,7 +432,7 @@ const [newState, deletedUsers] = await db.delete(state, 'users')
 
 ### Testing Your Logic
 
-Testing is a major strength of Konro. Since the core operations are pure functions, you can test your business logic without touching the filesystem.
+Testing is a major strength of Konro. Since the core operations are pure functions, you can test your business logic without touching the filesystem by using the `in-memory` API style.
 
 ```typescript
 // my-logic.test.ts
@@ -457,10 +441,10 @@ import { assert } from 'chai';
 
 describe('User Logic', () => {
   it('should create a user and a welcome post', () => {
-    // 1. Arrange: Create a clean, in-memory initial state using the db context.
+    // 1. Arrange: Create a clean, in-memory initial state.
     let state = db.createEmptyState();
 
-    // 2. Act: Call your application logic.
+    // 2. Act: Call your application logic, passing and re-assigning state.
     let newUser;
     [state, newUser] = db.insert(state, 'users', { name: 'Test', email: 'test@test.com' });
     [state] = db.insert(state, 'posts', { title: 'Welcome!', authorId: newUser.id });
@@ -475,47 +459,73 @@ describe('User Logic', () => {
 
 ### Performance Considerations
 
-Konro prioritizes data integrity, safety, and developer experience. The default adapters rewrite the entire data file(s) on every transaction. This is a deliberate trade-off for atomicity—it guarantees your database file is never corrupted by a partial write. For databases up to several dozen megabytes, this is typically instantaneous. For very large files or write-heavy applications, the overhead may become noticeable.
+Konro prioritizes data integrity, safety, and developer experience. Understanding the two access modes is key to performance.
+
+*   **`in-memory` Mode:**
+    *   **Pro:** Extremely fast queries, as all data is in RAM. Writes are atomic (the entire file is replaced), preventing corruption from partial writes.
+    *   **Con:** Can consume significant memory for large datasets. Writing back a very large file can be slow.
+
+*   **`on-demand` Mode:**
+    *   **Pro:** Low initial memory usage. Write operations are granular (only the affected table file is changed), which can be faster.
+    *   **Con:** Simple queries are fast. However, **relational queries** (using `.with()`) or **aggregations** will still load all required tables into memory for the duration of that single query. It is not a replacement for a true database server for complex, large-scale relational joins.
 
 ---
 
 ## 10. API Reference Cheatsheet
 
-| Category       | Method / Function                     | Purpose                                          |
-| -------------- | ------------------------------------- | ------------------------------------------------ |
-| **Schema**     | `konro.createSchema(def)`             | Defines the entire database structure.           |
-|                | `konro.id/string/number/etc`          | Defines column types and validation rules.       |
-|                | `konro.one/many(table, opts)`         | Defines relationships.                           |
-| **DB Context** | `konro.createDatabase(opts)`          | Creates the main `db` context object.            |
-|                | `createFileAdapter(opts)`             | Creates a single- or multi-file storage adapter. |
-| **I/O**        | `db.read()`                           | Reads state from disk.                           |
-|                | `db.write(state)`                     | Writes state to disk.                            |
-|                | `db.createEmptyState()`               | Creates a fresh, empty `DatabaseState` object.   |
-| **Data Ops**   | `db.query(state)`                     | Starts a fluent read-query chain.                |
-|                | `db.insert(state, table, vals)`       | Returns `[newState, inserted]`.                  |
-|                | `...aggregate(aggs)`                  | Terminator: Computes aggregations like count, sum, etc. |
-|                | `db.update(state, table)`             | Starts a fluent update-query chain.              |
-|                | `db.delete(state, table)`             | Starts a fluent delete-query chain.              |
+| Category       | Method / Function                     | Purpose                                          | Notes                                     |
+| -------------- | ------------------------------------- | ------------------------------------------------ | ----------------------------------------- |
+| **Schema**     | `konro.createSchema(def)`             | Defines the entire database structure.           |                                           |
+|                | `konro.id/string/number/etc`          | Defines column types and validation rules.       |                                           |
+|                | `konro.one/many(table, opts)`         | Defines relationships.                           |                                           |
+| **DB Context** | `konro.createDatabase(opts)`          | Creates the main `db` context object.            | API changes based on adapter's `mode`.      |
+|                | `createFileAdapter(opts)`             | Creates a file storage adapter. | `format`, `mode`, `single`/`multi` |
+| **I/O**        | `db.read()`                           | Reads state from disk.                           | `in-memory` mode only.                    |
+|                | `db.write(state)`                     | Writes state to disk.                            | `in-memory` mode only.                    |
+|                | `db.createEmptyState()`               | Creates a fresh, empty `DatabaseState` object.   | Useful for testing.                       |
+| **Data Ops**   | `db.query(state?)`                    | Starts a fluent read-query chain.                | `state` arg for `in-memory` mode only. Terminals are `async` in `on-demand`. |
+|                | `db.insert(state?, ...)`              | Inserts records. Returns `[newState, result]` or `Promise<result>`. |                                           |
+|                | `db.update(state?, ...)`              | Starts a fluent update chain.                    |                                           |
+|                | `db.delete(state?, ...)`              | Starts a fluent delete chain.                    |                                           |
 
 ---
 
-## 11. Comparison to Other Libraries
+## 11. Roadmap
+
+Konro is actively developed. Here are some features planned for the future:
+
+*   **🚀 Performance Enhancements:**
+    *   In-memory indexing for `on-demand` mode to speed up lookups without loading full tables.
+    *   More efficient partial file updates for JSON/YAML formats.
+*   **✨ Querying Power:**
+    *   Support for more complex query operators (`$gt`, `$in`, `$like`, etc.) in `.where()`.
+    *   Full-text search capabilities.
+*   **🔧 Developer Experience:**
+    *   A simple data migration system.
+    *   A pluggable logging system for debugging queries.
+    *   An adapter "decorator" for transparent data encryption at rest.
+
+Have an idea? Please [open an issue](https://github.com/relaycoder/konro/issues) to discuss it!
+
+---
+
+## 12. Comparison to Other Libraries
 
 | Feature          | `lowdb` (v3+)                                | **Konro**                                                                | `Prisma / Drizzle` (Full-scale ORMs) |
 | ---------------- | -------------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
 | **Paradigm**     | Simple Document Store                        | **Functional, Relational ORM**                                           | Client-Server ORMs                                                                |
 | **Schema**       | Schema-less, manual types                    | **Type-First**, inferred static types                                    | Schema-first (via `.prisma` file or code)                                         |
-| **API Style**    | Mutable (`db.data.push(...)`)                | **Immutable & Fluent** (`db.query(state)...`)                            | Stateful Client (`prisma.user.create(...)`)                                       |
-| **State Mgmt**   | Direct mutation                              | **Explicit state passing** `(state) => [newState, result]`               | Managed by the client instance                                                    |
-| **Storage**      | JSON/YAML files                              | **JSON/YAML files (pluggable)**                                          | External databases (PostgreSQL, MySQL, etc.)                                      |
+| **API Style**    | Mutable (`db.data.push(...)`)                | **Immutable & Fluent** (`db.query(state)...`) or **Async** (`await db.query()...`) | Stateful Client (`prisma.user.create(...)`)                                       |
+| **State Mgmt**   | Direct mutation                              | **Explicit state passing or Async I/O**               | Managed by the client instance                                                    |
+| **Storage**      | JSON/YAML files                              | **JSON, YAML, CSV, XLSX (pluggable)**                                    | External databases (PostgreSQL, MySQL, etc.)                                      |
 | **Best For**     | Quick scripts, simple configs                | **Local-first apps, CLIs, small servers needing safety and structure.**  | Production web applications with traditional client-server database architecture. |
 
 ---
 
-## 12. Contributing
+## 13. Contributing
 
 Konro is a community-driven project. Contributions are warmly welcome. Whether it's reporting a bug, suggesting a feature, improving the documentation, or submitting a pull request, your input is valuable. Please open an issue to discuss your ideas first.
 
-## 13. License
+## 14. License
 
 [MIT](./LICENSE) © [relaycoder]

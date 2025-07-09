@@ -6,12 +6,6 @@ update readme for on demand feature
 
 ####
 
-add integration test for on-demand data
+add integration test files and cases for on-demand feature
 
-####
 
-data aggregation
-
-####
-
-primary key can also use uuid

@@ -33,9 +33,9 @@ describe('Integration > Types > InferredTypes', () => {
 
     // This should be valid
     user.name; // Accessing for type check
-    const adapter = konro.createFileAdapter({ format: 'json', single: { filepath: 'dummy.json' }});
-    const db = konro.createDatabase({ schema: testSchema, adapter });
-    const state = db.createEmptyState();
+    const inMemoryAdapter = konro.createFileAdapter({ format: 'json', single: { filepath: 'dummy.json' }});
+    const db = konro.createDatabase({ schema: testSchema, adapter: inMemoryAdapter });
+    const state = db.createEmptyState(); // For in-memory db
 
     // Test 2: Should cause a TS error if a non-existent field is used in a where clause.
     // @ts-expect-error - 'nonExistentField' does not exist on type 'User'.
@@ -52,15 +52,15 @@ describe('Integration > Types > InferredTypes', () => {
     // @ts-ignore - This is a type test only, not runtime code
     db.insert(state, 'users', { name: 'Bob', email: 'bob@test.com', age: 25 });
 
-    // Test 4: Nested .with clause should be typed correctly
-    db.query(state).from('users').with({ // TODO: `query` should not require state in on-demand mode.
+    // Test 4: Nested .with clause on in-memory db should be typed correctly
+    db.query(state).from('users').with({
       posts: {
         where: (post) => post.title.startsWith('A') // post is typed as Post
       }
     }).first();
 
     // @ts-expect-error - 'nonExistentRelation' is not a valid relation on 'users'
-    db.query(state).from('users').with({ nonExistentRelation: true }); // TODO: `query` should not require state in on-demand mode.
+    db.query(state).from('users').with({ nonExistentRelation: true });
 
     // Test 5: A query without .with() should return the base type, without relations.
     const baseUser = db.query(state).from('users').where({ id: 1 }).first();
@@ -74,5 +74,27 @@ describe('Integration > Types > InferredTypes', () => {
     userWithPosts?.posts; // This should be valid and typed as Post[] | undefined
     
     // userWithPosts?.posts?.[0]?.author; 
+
+    // --- On-Demand DB Type Tests ---
+    const onDemandAdapter = konro.createFileAdapter({ format: 'yaml', mode: 'on-demand', multi: { dir: 'dummy-dir' }});
+    const onDemandDb = konro.createDatabase({ schema: testSchema, adapter: onDemandAdapter });
+
+    // Test 7: On-demand query should not require state.
+    onDemandDb.query().from('users').where({ name: 'Alice' }).first(); // Should be valid
+
+    // Test 8: On-demand query with .with() should be typed correctly without state.
+    onDemandDb.query().from('users').with({
+      posts: {
+        where: (post) => post.title.startsWith('A')
+      }
+    }).first();
+
+    // @ts-expect-error - 'nonExistentRelation' is not a valid relation on 'users'
+    onDemandDb.query().from('users').with({ nonExistentRelation: true });
+
+    // Test 9: On-demand insert should be awaitable and return the correct type.
+    const insertedUserPromise = onDemandDb.insert('users', { name: 'OnDemand', email: 'od@test.com', age: 22 });
+    // @ts-expect-error - 'posts' should not exist on the base inserted type
+    insertedUserPromise.then(u => u.posts);
   });
 });

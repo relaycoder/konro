@@ -1,52 +1,59 @@
 import { describe, it, expect, beforeEach } from 'bun:test';
 import { _deleteImpl } from '../../../src/operations';
 import { DatabaseState, KRecord } from '../../../src/types';
-import { KonroSchema } from '../../../src/schema';
+import { konro } from '../../../src/index';
 
 describe('Unit > Core > Delete', () => {
     let testState: DatabaseState;
-    const mockSchema: KonroSchema<any, any> = {
+
+    const hardDeleteSchema = konro.createSchema({
         tables: {
-            users: { 
-                id: { dataType: 'id' } as any, 
-                name: {} as any, 
-                email: {} as any, 
-                age: {} as any, 
-                deletedAt: { options: { _konro_sub_type: 'deletedAt' } } as any 
-            },
-            posts: { 
-                id: { dataType: 'id' } as any, 
-                title: {} as any, 
-                userId: {} as any 
-            },
-            profiles: { records: [], meta: { lastId: 0 } },
-            tags: { records: [], meta: { lastId: 0 } },
-            posts_tags: { records: [], meta: { lastId: 0 } },
-        },
-        relations: {
             users: {
-                posts: { 
-                    _type: 'relation', 
-                    relationType: 'many', 
-                    targetTable: 'posts', 
-                    on: 'id', 
-                    references: 'userId', 
-                    onDelete: 'CASCADE' 
-                }
-            }
+                id: konro.id(),
+                name: konro.string(),
+                email: konro.string(),
+                age: konro.number(),
+            },
+            posts: {
+                id: konro.id(),
+                title: konro.string(),
+                userId: konro.number()
+            },
+            profiles: { id: konro.id(), bio: konro.string(), userId: konro.number() },
+            tags: { id: konro.id(), name: konro.string() },
+            posts_tags: { id: konro.id(), postId: konro.number(), tagId: konro.number() },
         },
-        types: {} as any,
-        base: {} as any,
-        create: {} as any,
-    };
+        relations: () => ({
+            users: {
+                posts: konro.many('posts', { on: 'id', references: 'userId', onDelete: 'CASCADE' })
+            }
+        })
+    });
     
-    const hardDeleteSchema: KonroSchema<any, any> = {
-        ...mockSchema,
+    const softDeleteSchema = konro.createSchema({
         tables: {
-            ...mockSchema.tables,
-            users: { id: { dataType: 'id' } as any, name: {} as any, email: {} as any, age: {} as any },
-        }
-    };
+            users: {
+                id: konro.id(),
+                name: konro.string(),
+                email: konro.string(),
+                age: konro.number(),
+                deletedAt: konro.deletedAt()
+            },
+            posts: {
+                id: konro.id(),
+                title: konro.string(),
+                userId: konro.number()
+            },
+            profiles: { id: konro.id(), bio: konro.string(), userId: konro.number() },
+            tags: { id: konro.id(), name: konro.string() },
+            posts_tags: { id: konro.id(), postId: konro.number(), tagId: konro.number() },
+        },
+        relations: () => ({
+            users: {
+                posts: konro.many('posts', { on: 'id', references: 'userId', onDelete: 'CASCADE' })
+            }
+        })
+    });
 
     beforeEach(() => {
         testState = {
@@ -105,7 +112,7 @@ describe('Unit > Core > Delete', () => {
     });
 
     it('should soft delete a record by setting deletedAt if the column exists in schema', () => {
-        const [newState, deleted] = _deleteImpl(testState, mockSchema, 'users', (r) => r.id === 2);
+        const [newState, deleted] = _deleteImpl(testState, softDeleteSchema, 'users', (r) => r.id === 2);
 
         expect(newState.users!.records.length).toBe(3); // Record is not removed
         const deletedUser = newState.users!.records.find(u => u.id === 2);
@@ -118,7 +125,7 @@ describe('Unit > Core > Delete', () => {
 
     it('should not soft delete an already soft-deleted record', () => {
         (testState.users!.records[1] as KRecord).deletedAt = new Date('2024-01-01');
-        const [newState, deleted] = _deleteImpl(testState, mockSchema, 'users', (r) => r.id === 2);
+        const [newState, deleted] = _deleteImpl(testState, softDeleteSchema, 'users', (r) => r.id === 2);
 
         expect(newState).toBe(testState); // Should return original state as nothing changed
         expect(deleted.length).toBe(0);
@@ -126,7 +133,7 @@ describe('Unit > Core > Delete', () => {
     });
 
     it('should perform a cascading delete on related records', () => {
-        const [newState, deletedUsers] = _deleteImpl(testState, mockSchema, 'users', (r) => r.id === 1);
+        const [newState, deletedUsers] = _deleteImpl(testState, softDeleteSchema, 'users', (r) => r.id === 1);
         
         expect(deletedUsers.length).toBe(1);
         expect(newState.users!.records.find(u => u.id === 1)?.deletedAt).toBeInstanceOf(Date);

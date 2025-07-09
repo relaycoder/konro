@@ -1,8 +1,8 @@
 import path from 'path';
-import { DatabaseState } from './types';
+import type { DatabaseState, TableState } from './types';
 import { createEmptyState } from './operations';
-import { KonroSchema } from './schema';
-import { Serializer, getSerializer } from './utils/serializer.util';
+import type { ColumnDefinition, KonroSchema } from './schema';
+import { type Serializer, getSerializer } from './utils/serializer.util';
 import { FsProvider, defaultFsProvider, writeAtomic } from './fs';
 import { KonroError, KonroStorageError } from './utils/error.util';
 
@@ -42,74 +42,64 @@ export function createFileAdapter(options: FileAdapterOptions): FileStorageAdapt
   const fs = options.fs ?? defaultFsProvider;
   const mode = options.mode ?? 'in-memory';
 
-  // CSV and XLSX are structured as single tables, so they only make sense with on-demand, multi-file storage.
-  if ((options.format === 'csv' || options.format === 'xlsx') && (mode !== 'on-demand' || !options.multi)) {
-    throw KonroError(`The '${options.format}' format only supports the 'on-demand' mode with the 'multi-file' storage strategy.`);
+  const isTabular = options.format === 'csv' || options.format === 'xlsx';
+  if (isTabular && (mode !== 'on-demand' || !options.multi)) {
+    throw KonroError(`The '${options.format}' format only supports 'on-demand' mode with a 'multi-file' strategy.`);
   }
 
-  // The 'on-demand' mode is fundamentally incompatible with a single-file approach
   if (mode === 'on-demand' && options.single) {
     throw KonroError("The 'on-demand' mode requires the 'multi-file' storage strategy.");
   }
 
-  const readSingle = async <S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>> => {
-    const filepath = options.single!.filepath;
+  const parseFile = async <T>(filepath: string, schema?: Record<string, ColumnDefinition<any>>): Promise<T | undefined> => {
     const data = await fs.readFile(filepath);
-    if (!data) return createEmptyState(schema);
+    if (!data) return undefined;
     try {
-      return serializer.parse<DatabaseState<S>>(data);
+      return serializer.parse<T>(data, schema);
     } catch (e: any) {
       throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${options.format} file. Original error: ${e.message}`);
     }
   };
 
-  const writeSingle = async (state: DatabaseState<any>): Promise<void> => {
-    const filepath = options.single!.filepath;
-    await writeAtomic(filepath, serializer.stringify(state), fs);
+  const readSingle = async <S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>> => {
+    const state = await parseFile<DatabaseState<any>>(options.single!.filepath);
+    // The cast is acceptable as the original code made the same implicit assumption.
+    return (state ?? createEmptyState(schema)) as DatabaseState<S>;
   };
-  
+
   const readMulti = async <S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>> => {
     const dir = options.multi!.dir;
-    const state = createEmptyState(schema);
     await fs.mkdir(dir, { recursive: true });
-
-    for (const tableName in schema.tables) {
-      const filepath = path.join(dir, `${tableName}${fileExtension}`);
-      const data = await fs.readFile(filepath);
-      if (data) {
-        try {
-          // This is a controlled cast, safe because we are iterating over the schema's tables.
-          (state as any)[tableName] = serializer.parse(data);
-        } catch (e: any) {
-          throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${options.format} file. Original error: ${e.message}`);
-        }
-      }
-    }
+    const state = createEmptyState(schema);
+    await Promise.all(
+      Object.keys(schema.tables).map(async (tableName) => {
+        const filepath = path.join(dir, `${tableName}${fileExtension}`);
+        const tableState = await parseFile<TableState<any>>(filepath, schema.tables[tableName]);
+        if (tableState) (state as any)[tableName] = tableState;
+      })
+    );
     return state;
   };
-  
-  const writeMulti = async (state: DatabaseState<any>): Promise<void> => {
-    const dir = options.multi!.dir;
-    await fs.mkdir(dir, { recursive: true }); // Ensure directory exists
 
+  const writeSingle = (state: DatabaseState<any>) => writeAtomic(options.single!.filepath, serializer.stringify(state), fs);
+
+  const writeMulti = async (state: DatabaseState<any>) => {
+    const dir = options.multi!.dir;
+    await fs.mkdir(dir, { recursive: true });
     const writes = Object.entries(state).map(([tableName, tableState]) => {
       const filepath = path.join(dir, `${tableName}${fileExtension}`);
-      const content = serializer.stringify(tableState);
-      return writeAtomic(filepath, content, fs);
-    });
+      return writeAtomic(filepath, serializer.stringify(tableState), fs);
+    });
     await Promise.all(writes);
   };
 
-  const adapterInternals = {
+  return {
     options,
     fs,
     serializer,
     fileExtension,
     mode,
-  };
-
-  if (options.single) {
-    return { ...adapterInternals, read: readSingle, write: writeSingle } as FileStorageAdapter;
-  } else {
-    return { ...adapterInternals, read: readMulti, write: writeMulti } as FileStorageAdapter;
-  }};
+    read: options.single ? readSingle : readMulti,
+    write: options.single ? writeSingle : writeMulti,
+  } as FileStorageAdapter;
+}

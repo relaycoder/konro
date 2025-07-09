@@ -39,6 +39,7 @@ Konro is a new kind of "micro-ORM" for JavaScript and TypeScript. It offers the 
 8.  [**Pillar III: Cooking (The Fluent API)**](#8-pillar-iii-cooking-the-fluent-api)
     *   [Two API Styles: In-Memory vs. On-Demand](#two-api-styles-in-memory-vs-on-demand)
     *   [Reading Data with `db.query()`](#reading-data-with-dbquery)
+    *   [Automatic Timestamps and Soft Deletes](#automatic-timestamps-and-soft-deletes)
     *   [Advanced Queries with `.with()`](#advanced-queries-with-with)
     *   [Aggregating Data](#aggregating-data)
     *   [Writing Data: `insert`, `update`, `delete`](#writing-data-insert-update-delete)
@@ -67,8 +68,9 @@ Konro is inspired by the art of Indonesian cooking, where a rich soup or `Konro`
 *   **Type-First, Not Schema-First:** You don't write a schema to get types. You write a schema *as* types. Your schema definition becomes your single source of truth for both runtime validation and static TypeScript types.
 *   **Stateless Core, Stateful Feel:** The internal engine is a collection of pure, stateless functions (`(state, args) => newState`). The user-facing API is a fluent, chainable "query builder" that feels intuitive and stateful, giving you the best of both worlds.
 *   **Immutable by Default:** In its primary `in-memory` mode, data is never mutated. Every `insert`, `update`, or `delete` operation is an explicit API call that returns a `[newState, result]` tuple. This eliminates side effects and makes state management predictable and safe.
-*   **Relational at Heart:** Define `one-to-one`, `one-to-many`, and `many-to-one` relationships directly in your schema. Eager-load related data with a powerful and fully-typed `.with()` clause, where TypeScript precisely infers the shape of the result based on your query's structure.
-*   **Scales with You:** Start with a simple, atomic JSON file (`in-memory` mode). As your data grows, switch to `on-demand` mode to reduce memory usage, reading from the filesystem only when needed.
+*   **Relational at Heart:** Define `one-to-one`, `one-to-many`, and `many-to-one` relationships directly in your schema. Eager-load related data with a powerful `.with()` clause, and define cascading delete behavior right where it belongs.
+*   **Managed Lifecycle:** Automate timestamps (`createdAt`, `updatedAt`) and implement soft deletes (`deletedAt`) with simple schema declarations, reducing boilerplate code.
+*   **Scales with You:** Start with a simple, atomic JSON file (`in-memory` mode). As your data grows, switch to `on-demand` mode with `multi-file` or `per-record` strategies to reduce memory usage and get more granular I/O.
 
 ## 3. When to Use Konro (and When Not To)
 
@@ -81,7 +83,7 @@ Konro is inspired by the art of Indonesian cooking, where a rich soup or `Konro`
 
 ❌ **Consider other solutions if you need:**
 
-*   **High-Concurrency Writes:** Konro's default file-based adapters are not designed for environments where many processes need to write to the database simultaneously at high frequency.
+*   **High-Concurrency Writes:** Konro's file-based adapters are not designed for environments where many processes need to write to the database simultaneously at high frequency.
 *   **Extreme Performance at Scale:** While `on-demand` mode helps with memory, complex relational queries still load data into memory. For gigabyte-scale relational processing, a dedicated database server is more appropriate.
 *   **Distributed Systems:** Konro is a single-node database solution by design.
 
@@ -110,7 +112,7 @@ npm install xlsx
 
 ## 5. The 5-Minute Recipe: A Quick Start
 
-Let's build a simple, relational blog database from scratch.
+Let's build a simple, relational blog database from scratch, complete with managed timestamps and soft deletes.
 
 **Step 1: Define the Recipe (`src/schema.ts`)**
 Create a single source of truth for your entire database structure. Konro will infer your TypeScript types from this object.
@@ -124,17 +126,22 @@ export const blogSchema = konro.createSchema({
       id: konro.id(),
       name: konro.string({ min: 2 }),
       email: konro.string({ format: 'email', unique: true }),
+      createdAt: konro.createdAt(),
+      deletedAt: konro.deletedAt(), // Enables soft deletes
     },
     posts: {
       id: konro.id(),
       title: konro.string({ min: 5 }),
       published: konro.boolean({ default: false }),
       authorId: konro.number({ type: 'integer' }),
+      createdAt: konro.createdAt(),
+      updatedAt: konro.updatedAt(), // Managed timestamp
     },
   },
   relations: (t) => ({
     users: {
-      posts: konro.many('posts', { on: 'id', references: 'authorId' }),
+      // If a user is hard-deleted, all their posts are also deleted.
+      posts: konro.many('posts', { on: 'id', references: 'authorId', onDelete: 'CASCADE' }),
     },
     posts: {
       author: konro.one('users', { on: 'authorId', references: 'id' }),
@@ -148,14 +155,15 @@ export type Post = typeof blogSchema.types.posts;
 ```
 
 **Step 2: Prepare the Kitchen (`src/db.ts`)**
-Create a database context that is pre-configured with your schema and a storage adapter. This example uses the default `in-memory` mode.
+Create a database context that is pre-configured with your schema and a storage adapter. This example uses the `in-memory` mode.
 
 ```typescript
-import { konro, createFileAdapter } from 'konro';
+import { konro } from 'konro';
 import { blogSchema } from './schema';
 
 // Use a multi-file YAML adapter to create 'users.yaml' and 'posts.yaml'.
-const adapter = createFileAdapter({
+// Other strategies: `single: { ... }` or `perRecord: { ... }`
+const adapter = konro.createFileAdapter({
   format: 'yaml', // 'json', 'yaml', 'csv', 'xlsx'
   multi: { dir: './data/yaml_db' },
   // mode: 'in-memory' is the default
@@ -180,8 +188,7 @@ async function main() {
   let state = await db.read();
   console.log('Database state loaded.');
 
-  // 2. INSERT a new user. `db.insert` is a pure function.
-  // It returns a tuple: [newState, insertedRecord].
+  // 2. INSERT a new user. `createdAt` is set automatically.
   let newUser: User;
   [state, newUser] = db.insert(state, 'users', {
     name: 'Chef Renatta',
@@ -189,32 +196,36 @@ async function main() {
   });
   console.log('User created:', newUser);
 
-  // Use the NEW state for the next operation. This is key to immutability.
+  // Use the NEW state. `createdAt` and `updatedAt` are set automatically.
   [state] = db.insert(state, 'posts', {
     title: 'The Art of Plating',
     authorId: newUser.id,
   });
 
-  // 3. UPDATE a record using the fluent API.
+  // 3. UPDATE a record. `updatedAt` is updated automatically.
   let updatedPosts; // Type inferred as Post[]
   [state, updatedPosts] = db.update(state, 'posts')
     .set({ published: true })
     .where({ id: 1 });
   console.log('Post published:', updatedPosts[0]);
 
-  // 4. WRITE the final state back to disk.
+  // 4. SOFT DELETE the user. Because the `users` table has a `deletedAt` column,
+  // this performs a soft delete.
+  let deletedUsers;
+  [state, deletedUsers] = db.delete(state, 'users').where({ id: newUser.id });
+  console.log('Soft-deleted user:', deletedUsers[0].name);
+
+  // By default, queries now EXCLUDE the soft-deleted user.
+  const user = db.query(state).from('users').where({ id: newUser.id }).first();
+  console.log('User found after delete?', user); // null
+
+  // But you can query for them explicitly with `withDeleted()`.
+  const softDeletedUser = db.query(state).from('users').withDeleted().where({ id: newUser.id }).first();
+  console.log('User found with withDeleted()?', softDeletedUser?.name);
+
+  // 5. WRITE the final state back to disk.
   await db.write(state);
   console.log('Database saved!');
-
-  // 5. QUERY the data. Note that `db.query` also takes the state.
-  const authorWithPosts = db.query(state)
-    .from('users')
-    .where({ id: newUser.id })
-    .with({ posts: true }) // Eager-load the 'posts' relation
-    .first();
-
-  console.log('\n--- Final Query Result ---');
-  console.log(JSON.stringify(authorWithPosts, null, 2));
 }
 
 main().catch(console.error);
@@ -239,11 +250,14 @@ Under the `tables` key, you define each table and its columns using Konro's help
 | ------------------ | -------------------------------------------------------------------------------------- |
 | `konro.id()`       | A managed, auto-incrementing integer primary key.                                      |
 | `konro.uuid()`     | A managed, UUID string primary key.                                                    |
-| `konro.string()`   | `{ unique, default, min, max, format: 'email' | 'uuid' | 'url' }`                        |
+| `konro.string()`   | `{ unique, default, min, max, format: 'email' \| 'uuid' \| 'url' }`                        |
 | `konro.number()`   | `{ unique, default, min, max, type: 'integer' }`                                       |
 | `konro.boolean()`  | `{ default }`                                                                          |
 | `konro.date()`     | `{ default }` (e.g., `() => new Date()`). Stored as an ISO string.                      |
 | `konro.object()`   | Stores an arbitrary JSON object.                                                       |
+| `konro.createdAt()`| A managed timestamp set only when a record is created.                                   |
+| `konro.updatedAt()`| A managed timestamp set when a record is created *and* updated.                          |
+| `konro.deletedAt()`| A managed, nullable timestamp for enabling soft deletes on a table.                      |
 
 ### Defining Relationships
 
@@ -252,9 +266,12 @@ Under the `relations` key, you define how your tables connect. This centralized 
 *   `konro.one(targetTable, options)`: Defines a `one-to-one` or `many-to-one` relationship. This is used on the table that holds the foreign key.
 *   `konro.many(targetTable, options)`: Defines a `one-to-many` relationship. This is used on the table that is being pointed to.
 
-The `options` object is `{ on: string, references: string }`.
+The `options` object is `{ on: string, references: string, onDelete?: 'CASCADE' | 'SET NULL' }`.
 *   `on`: The key on the **current** table.
 *   `references`: The key on the **related** table.
+*   `onDelete`: (Optional) Defines the behavior when a parent record is deleted.
+    *   `'CASCADE'`: Automatically delete the related records.
+    *   `'SET NULL'`: Set the foreign key on related records to `null`.
 
 ### Inferring Static Types: The Magic
 
@@ -276,11 +293,12 @@ The database context is a pre-configured object that makes interacting with your
 
 ### Choosing a Storage Adapter
 
-Konro ships with a flexible file adapter supporting multiple formats and strategies. You configure it when creating your `db` context using `createFileAdapter(options)`.
+Konro ships with a flexible file adapter supporting multiple formats and strategies. You configure it when creating your `db` context using `konro.createFileAdapter(options)`.
 
 *   `format`: `'json' | 'yaml' | 'csv' | 'xlsx'` (required).
-*   `single`: `{ filepath: string }`. Stores the entire database state in one monolithic file. Simple and atomic. **Only works with `json` and `yaml` in `in-memory` mode.**
-*   `multi`: `{ dir: string }`. Stores each table in its own file within a directory. Great for organization and required for `on-demand` mode.
+*   `single`: `{ filepath: string }`. Stores the entire database state in one monolithic file. Simple and atomic.
+*   `multi`: `{ dir: string }`. Stores each table in its own file within a directory. Great for organization and required for some `on-demand` features.
+*   `perRecord`: `{ dir: string }`. Stores each record in its own file within a table-specific subdirectory. Best for granular I/O.
 *   `mode`: `'in-memory'` (default) or `'on-demand'`. This is a crucial choice that affects performance and the API style.
 
 ### Data Access Modes: `in-memory` vs `on-demand`
@@ -291,8 +309,9 @@ Konro ships with a flexible file adapter supporting multiple formats and strateg
 | **`on-demand`** | Each operation (`insert`, `query`, `update`, etc.) reads from and writes to the filesystem directly. There is no manual `state` object to manage. | Async/Stateless: `async (args) => result`    | Larger datasets where memory is a concern. More granular I/O operations. |
 
 **Important Constraints:**
-*   `on-demand` mode **requires** the `multi: { dir: string }` file strategy.
-*   `csv` and `xlsx` formats **require** `on-demand` mode. This is because they are non-relational by nature and store no database-level metadata.
+*   `on-demand` mode **requires** either the `multi` or `perRecord` file strategy. It does not work with `single`.
+*   The `perRecord` strategy only supports `json` and `yaml` formats.
+*   `csv` and `xlsx` formats **require** `on-demand` mode and the `multi` strategy.
 
 ### The `konro.createDatabase` Function
 
@@ -334,17 +353,27 @@ const users = await db.query().from('users').all();
 ```
 The available methods are:
 ```typescript
-db.query(state?) // state is omitted in on-demand mode
-  .select(fields?)   // Optional: Pick specific fields. Fully typed!
+db.query(state?)   // state is omitted in on-demand mode
   .from(tableName)  // Required: The table to query, e.g., 'users'
   .where(predicate) // Optional: Filter records.
   .with(relations)  // Optional: Eager-load relations, e.g., { posts: true }
+  .withDeleted()    // Optional: Include soft-deleted records in the result.
+  .select(fields?)  // Optional: Pick specific fields. Fully typed!
   .limit(number)    // Optional: Limit the number of results
   .offset(number)   // Optional: Skip records for pagination
   .all();           // Returns T[] or Promise<T[]>
 
 db.query(state?).from('users').where({ id: 1 }).first(); // Returns T | null or Promise<T | null>
 ```
+
+### Automatic Timestamps and Soft Deletes
+
+Konro automates common lifecycle tasks based on your schema.
+
+*   **`createdAt`**: This timestamp is set automatically when you `insert` a new record.
+*   **`updatedAt`**: This timestamp is set automatically on `insert` and `update`.
+*   **`deletedAt`**: If a table schema includes `konro.deletedAt()`, the `db.delete()` operation will perform a **soft delete** instead of a hard delete. It sets the `deletedAt` timestamp to the current time.
+*   **Query Filtering**: By default, all queries automatically filter out records that have been soft-deleted. To include them in your results, chain `.withDeleted()` to your query.
 
 ### Advanced Queries with `.with()`
 
@@ -425,6 +454,7 @@ Write operations clearly show the difference between the two modes.
 | `insert`  | `const [newState, newUser] = db.insert(state, 'users', { ... });`                    | `const newUser = await db.insert('users', { ... });`                                |
 | `update`  | `const [newState, updated] = db.update(state, 'users').set({..}).where({..});`       | `const updated = await db.update('users').set({..}).where({..});`                    |
 | `delete`  | `const [newState, deleted] = db.delete(state, 'users').where({..});`                 | `const deleted = await db.delete('users').where({..});`                              |
+**Notes:** `insert` and `update` automatically manage `createdAt`/`updatedAt` timestamps. `delete` performs a soft delete if the table schema has a `deletedAt` column.
 
 ---
 
@@ -459,15 +489,19 @@ describe('User Logic', () => {
 
 ### Performance Considerations
 
-Konro prioritizes data integrity, safety, and developer experience. Understanding the two access modes is key to performance.
+Konro prioritizes data integrity, safety, and developer experience. Understanding the file strategies and access modes is key to performance.
 
 *   **`in-memory` Mode:**
     *   **Pro:** Extremely fast queries, as all data is in RAM. Writes are atomic (the entire file is replaced), preventing corruption from partial writes.
     *   **Con:** Can consume significant memory for large datasets. Writing back a very large file can be slow.
 
 *   **`on-demand` Mode:**
-    *   **Pro:** Low initial memory usage. Write operations are granular (only the affected table file is changed), which can be faster.
+    *   **Pro:** Low initial memory usage. Write operations are more granular (only affected files are changed), which can be faster.
     *   **Con:** Simple queries are fast. However, **relational queries** (using `.with()`) or **aggregations** will still load all required tables into memory for the duration of that single query. It is not a replacement for a true database server for complex, large-scale relational joins.
+
+*   **`per-record` Strategy:**
+    *   **Pro:** Very granular writes. Good if you update individual records frequently. Reduces the "blast radius" of a write operation compared to `single` or `multi` file strategies.
+    *   **Con:** Can create a large number of files on disk. Reading an entire table (e.g., a query with no `where` clause) can be slower due to needing many individual file system reads.
 
 ---
 
@@ -477,16 +511,18 @@ Konro prioritizes data integrity, safety, and developer experience. Understandin
 | -------------- | ------------------------------------- | ------------------------------------------------ | ----------------------------------------- |
 | **Schema**     | `konro.createSchema(def)`             | Defines the entire database structure.           |                                           |
 |                | `konro.id/string/number/etc`          | Defines column types and validation rules.       |                                           |
-|                | `konro.one/many(table, opts)`         | Defines relationships.                           |                                           |
+|                | `konro.createdAt/updatedAt/deletedAt` | Defines managed timestamp columns.               | Enables automatic timestamps & soft deletes. |
+|                | `konro.one/many(table, opts)`         | Defines relationships.                           | `onDelete` option enables cascades.       |
 | **DB Context** | `konro.createDatabase(opts)`          | Creates the main `db` context object.            | API changes based on adapter's `mode`.      |
-|                | `createFileAdapter(opts)`             | Creates a file storage adapter. | `format`, `mode`, `single`/`multi` |
+|                | `konro.createFileAdapter(opts)`       | Creates a file storage adapter. | `format`, `mode`, `single`/`multi`/`perRecord` |
 | **I/O**        | `db.read()`                           | Reads state from disk.                           | `in-memory` mode only.                    |
 |                | `db.write(state)`                     | Writes state to disk.                            | `in-memory` mode only.                    |
 |                | `db.createEmptyState()`               | Creates a fresh, empty `DatabaseState` object.   | Useful for testing.                       |
-| **Data Ops**   | `db.query(state?)`                    | Starts a fluent read-query chain.                | `state` arg for `in-memory` mode only. Terminals are `async` in `on-demand`. |
-|                | `db.insert(state?, ...)`              | Inserts records. Returns `[newState, result]` or `Promise<result>`. |                                           |
-|                | `db.update(state?, ...)`              | Starts a fluent update chain.                    |                                           |
-|                | `db.delete(state?, ...)`              | Starts a fluent delete chain.                    |                                           |
+| **Data Ops**   | `db.query(state?)`                    | Starts a fluent read-query chain.                | Terminals are `async` in `on-demand`. |
+|                | `...withDeleted()`                    | Includes soft-deleted records in a query.        | Only applies if table has `deletedAt`.    |
+|                | `db.insert(state?, ...)`              | Inserts records. Returns `[newState, result]` or `Promise<result>`. | Manages `createdAt`/`updatedAt`.           |
+|                | `db.update(state?, ...)`              | Starts a fluent update chain.                    | Manages `updatedAt`.                      |
+|                | `db.delete(state?, ...)`              | Starts a fluent delete chain.                    | Performs soft delete if `deletedAt` exists. |
 
 ---
 

@@ -1,5 +1,10 @@
 ####
 
+konro error codes. code and description list should be in separated ts file
+
+
+####
+
 add konro createdAt and updatedAt and deletedAt feature for all strategy and all file format.
 if konro deletedAt used, should auto soft delete include cascading relation... oh also you can add relational cascading feature
 ____

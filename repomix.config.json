@@ -25,14 +25,15 @@
   "include": [
     "package.json",
     "tsconfig.json", 
-    // "src",
-    "test/integration/InMemoryFlow/CrudCycle.test.ts",
-    "test/integration/Adapters/PerRecord.test.ts",
-    "src/adapter.ts",
-    "src/db.ts",
-    "src/schema.ts",
-    "src/operations.ts",
-    "src/types.ts"
+    "src",
+    "README.md"
+    // "test/integration/InMemoryFlow/CrudCycle.test.ts",
+    // "test/integration/Adapters/PerRecord.test.ts",
+    // "src/adapter.ts",
+    // "src/db.ts",
+    // "src/schema.ts",
+    // "src/operations.ts",
+    // "src/types.ts"
 
     // // "test/unit"
 

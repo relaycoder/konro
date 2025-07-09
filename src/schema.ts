@@ -45,11 +45,10 @@ type Models<
 };
 
 /** Finds all column names in a table definition that are optional for insertion (i.e., `id` or has a `default`). */
-/** Finds all column names in a table definition that are optional for insertion (i.e., `id` or has a `default`). */
 type OptionalCreateKeys<TTableDef> = {
   [K in keyof TTableDef]: TTableDef[K] extends { dataType: 'id' }
     ? K
-    : TTableDef[K] extends { options: { default: any } }
+    : TTableDef[K] extends { options: { default: unknown } }
     ? K
     : never;
 }[keyof TTableDef];
@@ -185,7 +184,7 @@ export const updatedAt = (): ColumnDefinition<Date> => createColumn<Date>('date'
 /** A managed, nullable timestamp for soft-deleting records. */
 export const deletedAt = (): ColumnDefinition<Date | null> => createColumn<Date | null>('date', { _konro_sub_type: 'deletedAt', default: null }, null);
 /** A column for storing arbitrary JSON objects, with a generic for type safety. */
-export const object = <T extends Record<string, any>>(options?: { default?: T | (() => T) }): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options });
+export const object = <T extends Record<string, unknown>>(options?: { default?: T | (() => T) }): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options });
 
 
 // --- RELATIONSHIP DEFINITION HELPERS ---

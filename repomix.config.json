@@ -25,15 +25,15 @@
   "include": [
     "package.json",
     "tsconfig.json", 
-    // "src",
-    // "test/unit"
+    "src",
+    // // "test/unit"
 
-    "src/schema.ts",
-    "src/operations.ts",
-    "src/db.ts",
-    "src/index.ts",
-    "src/adapter.ts",
-    "src/types.ts"
+    // "src/schema.ts",
+    // // "src/operations.ts",
+    // "src/db.ts",
+    // "src/index.ts",
+    // "src/adapter.ts",
+    // "src/types.ts"
   ],
   "ignore": {
     "useGitignore": true,

@@ -2,7 +2,7 @@ import path from 'path';
 import type { DatabaseState, KRecord, TableState } from './types';
 import { createEmptyState } from './operations';
 import type { ColumnDefinition, KonroSchema } from './schema';
-import { type Serializer, getSerializer } from './utils/serializer.util';
+import { getSerializer, type Serializer } from './utils/serializer.util';
 import { FsProvider, defaultFsProvider, writeAtomic } from './fs';
 import { KonroError, KonroStorageError } from './utils/error.util';
 import { TEMP_FILE_SUFFIX } from './utils/constants';
@@ -96,19 +96,21 @@ function createStrategy(options: FileAdapterOptions, context: StrategyContext): 
 function createSingleFileStrategy(options: SingleFileStrategy['single'], context: StrategyContext): FileStrategy {
   const { fs, serializer } = context;
 
-  const parseFile = async <T>(filepath: string, schema?: Record<string, ColumnDefinition<any>>): Promise<T | undefined> => {
+  const parseFile = async <T>(filepath: string, schema?: Record<string, ColumnDefinition<unknown>>): Promise<T | undefined> => {
     const data = await fs.readFile(filepath);
     if (!data) return undefined;
     try {
       return serializer.parse<T>(data, schema);
-    } catch (e: any) {
-      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${context.fileExtension.slice(1)} file. Original error: ${e.message}`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${context.fileExtension.slice(1)} file. Original error: ${message}`);
     }
   };
 
   return {
     read: async <S extends KonroSchema<any, any>>(schema: S) => {
-      const state = await parseFile<DatabaseState<any>>(options.filepath);
+      // We parse into a generic DatabaseState because the exact type is only known by the caller.
+      const state = await parseFile<DatabaseState>(options.filepath);
       return (state ?? createEmptyState(schema)) as DatabaseState<S>;
     },
     write: (state: DatabaseState<any>) => writeAtomic(options.filepath, serializer.stringify(state), fs),
@@ -118,13 +120,14 @@ function createSingleFileStrategy(options: SingleFileStrategy['single'], context
 /** Creates the strategy for reading/writing each table to its own file in a directory. */
 function createMultiFileStrategy(options: MultiFileStrategy['multi'], context: StrategyContext): FileStrategy {
   const { fs, serializer, fileExtension } = context;
-  const parseFile = async <T>(filepath: string, schema?: Record<string, ColumnDefinition<any>>): Promise<T | undefined> => {
+  const parseFile = async <T>(filepath: string, schema?: Record<string, ColumnDefinition<unknown>>): Promise<T | undefined> => {
     const data = await fs.readFile(filepath);
     if (!data) return undefined;
     try {
       return serializer.parse<T>(data, schema);
-    } catch (e: any) {
-      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${fileExtension.slice(1)} file. Original error: ${e.message}`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${fileExtension.slice(1)} file. Original error: ${message}`);
     }
   };
 
@@ -135,7 +138,7 @@ function createMultiFileStrategy(options: MultiFileStrategy['multi'], context: S
       await Promise.all(
         Object.keys(schema.tables).map(async (tableName) => {
           const filepath = path.join(options.dir, `${tableName}${context.fileExtension}`);
-          const tableState = await parseFile<TableState<any>>(filepath, schema.tables[tableName]);
+          const tableState = await parseFile<TableState>(filepath, schema.tables[tableName]);
           if (tableState) (state as any)[tableName] = tableState;
         })
       );
@@ -161,8 +164,9 @@ function createPerRecordStrategy(options: PerRecordStrategy['perRecord'], contex
     if (!data) return undefined;
     try {
       return serializer.parse<T>(data);
-    } catch (e: any) {
-      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${context.fileExtension.slice(1)} file. Original error: ${e.message}`);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${context.fileExtension.slice(1)} file. Original error: ${message}`);
     }
   };
 
@@ -173,20 +177,23 @@ function createPerRecordStrategy(options: PerRecordStrategy['perRecord'], contex
       await Promise.all(
         Object.keys(schema.tables).map(async (tableName) => {
           const tableDir = path.join(options.dir, tableName);
+          const currentTableState = state[tableName as keyof typeof state];
+          if (!currentTableState) return;
+
           await fs.mkdir(tableDir, { recursive: true });
 
           const metaContent = await fs.readFile(path.join(tableDir, '_meta.json')).catch(() => null);
-          if (metaContent) (state as any)[tableName].meta = JSON.parse(metaContent);
+          if (metaContent) currentTableState.meta = JSON.parse(metaContent);
 
           const files = await fs.readdir(tableDir);
           const recordFiles = files.filter((f) => !f.startsWith('_meta'));
           const records = (await Promise.all(recordFiles.map((file) => parseFile<KRecord>(path.join(tableDir, file))))).filter((r): r is KRecord => r != null);
-          (state as any)[tableName].records = records;
+          currentTableState.records = records as any;
 
-          if ((state as any)[tableName].meta.lastId === 0) {
+          if (currentTableState.meta.lastId === 0) {
             const idColumn = Object.keys(schema.tables[tableName]).find((k) => schema.tables[tableName][k]?.options?._pk_strategy === 'auto-increment');
             if (idColumn) {
-              (state as any)[tableName].meta.lastId = records.reduce((maxId: number, record: KRecord) => {
+              currentTableState.meta.lastId = records.reduce((maxId: number, record: KRecord) => {
                 const id = record[idColumn];
                 return typeof id === 'number' && id > maxId ? id : maxId;
               }, 0);
@@ -199,7 +206,7 @@ function createPerRecordStrategy(options: PerRecordStrategy['perRecord'], contex
     write: async (state: DatabaseState<any>, schema: KonroSchema<any, any>) => {
       await fs.mkdir(options.dir, { recursive: true });
       await Promise.all(Object.entries(state).map(async ([tableName, tableState]) => {
-        const tableDir = path.join(options.dir, tableName);
+        const tableDir = path.join(options.dir, tableName as string);
         await fs.mkdir(tableDir, { recursive: true });
         await writeAtomic(path.join(tableDir, '_meta.json'), JSON.stringify(tableState.meta, null, 2), fs);
 
@@ -209,8 +216,8 @@ function createPerRecordStrategy(options: PerRecordStrategy['perRecord'], contex
         const currentFiles = new Set(tableState.records.map((r: KRecord) => `${r[idColumn]}${fileExtension}`));
         const existingFiles = (await fs.readdir(tableDir)).filter(f => !f.startsWith('_meta') && !f.endsWith(TEMP_FILE_SUFFIX));
 
-        const recordWrites = tableState.records.map((r: KRecord) => writeAtomic(path.join(tableDir, `${r[idColumn]}${fileExtension}`), serializer.stringify(r), fs));
-        const recordDeletes = existingFiles.filter(f => !currentFiles.has(f)).map(f => fs.unlink(path.join(tableDir, f)));
+        const recordWrites = tableState.records.map((r) => writeAtomic(path.join(tableDir, `${r[idColumn]}${fileExtension}`), serializer.stringify(r), fs));
+        const recordDeletes = existingFiles.filter(f => !currentFiles.has(f)).map(f => fs.unlink(path.join(tableDir, f as string)));
         await Promise.all([...recordWrites, ...recordDeletes]);
       }));
     }

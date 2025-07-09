@@ -163,7 +163,7 @@ function createCoreDbContext<S extends KonroSchema<any, any>>(schema: S) {
     from: <TName extends keyof S['tables']>(tableName: TName): ChainedQueryBuilder<S, TName, S['base'][TName]> => {
       const createBuilder = <TReturn>(currentDescriptor: QueryDescriptor): ChainedQueryBuilder<S, TName, TReturn> => ({
         select(fields) { return createBuilder<TReturn>({ ...currentDescriptor, select: fields }); },
-        where(predicate) { return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate as any) }); },
+        where(predicate) { return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate as Parameters<typeof normalizePredicate>[0]) }); },
         withDeleted() { return createBuilder<TReturn>({ ...currentDescriptor, withDeleted: true }); },
         with<W extends WithArgument<S['types'][TName]>>(relations: W) {
           const newWith = { ...currentDescriptor.with, ...(relations as QueryDescriptor['with']) };
@@ -171,11 +171,11 @@ function createCoreDbContext<S extends KonroSchema<any, any>>(schema: S) {
         },
         limit(count) { return createBuilder<TReturn>({ ...currentDescriptor, limit: count }); },
         offset(count) { return createBuilder<TReturn>({ ...currentDescriptor, offset: count }); },
-        all: (): TReturn[] => _queryImpl(state as DatabaseState, schema, currentDescriptor) as any,
-        first: (): TReturn | null => (_queryImpl(state as DatabaseState, schema, { ...currentDescriptor, limit: 1 })[0] ?? null) as any,
-        aggregate: (aggregations) => {
+        all: (): TReturn[] => _queryImpl(state as DatabaseState, schema, currentDescriptor) as TReturn[],
+        first: (): TReturn | null => (_queryImpl(state as DatabaseState, schema, { ...currentDescriptor, limit: 1 })[0] ?? null) as TReturn | null,
+        aggregate: <TAggs extends Record<string, AggregationDefinition>>(aggregations: TAggs) => {
           const aggDescriptor: AggregationDescriptor = { ...currentDescriptor, aggregations };
-          return _aggregateImpl(state as DatabaseState, schema, aggDescriptor) as any;
+          return _aggregateImpl(state as DatabaseState, schema, aggDescriptor) as { [K in keyof TAggs]: number | null };
         },
       });
       return createBuilder<S['base'][TName]>({ tableName: tableName as string });
@@ -194,7 +194,7 @@ function createCoreDbContext<S extends KonroSchema<any, any>>(schema: S) {
   const update = <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): UpdateBuilder<S, S['base'][T], S['create'][T]> => ({
     set: (data) => ({
       where: (predicate) => {
-        const [newState, updatedRecords] = _updateImpl(state as DatabaseState, schema, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate as any));
+        const [newState, updatedRecords] = _updateImpl(state as DatabaseState, schema, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate as Parameters<typeof normalizePredicate>[0]));
         return [newState as DatabaseState<S>, updatedRecords as S['base'][T][]];
       },
     }),
@@ -202,7 +202,7 @@ function createCoreDbContext<S extends KonroSchema<any, any>>(schema: S) {
 
   const del = <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): DeleteBuilder<S, S['base'][T]> => ({
     where: (predicate) => {
-      const [newState, deletedRecords] = _deleteImpl(state as DatabaseState, schema, tableName as string, normalizePredicate(predicate as any));
+      const [newState, deletedRecords] = _deleteImpl(state as DatabaseState, schema, tableName as string, normalizePredicate(predicate as Parameters<typeof normalizePredicate>[0]));
       return [newState as DatabaseState<S>, deletedRecords as S['base'][T][]];
     },
   });
@@ -218,7 +218,7 @@ type CoreDbContext<S extends KonroSchema<any, any>> = ReturnType<typeof createCo
 interface OnDemandIO<S extends KonroSchema<any, any>> {
   getFullState(): Promise<DatabaseState<S>>;
   insert(core: CoreDbContext<S>, tableName: string, values: any): Promise<any>;
-  update(core: CoreDbContext<S>, tableName: string, data: Partial<KRecord>, predicate: (record: KRecord) => boolean): Promise<KRecord[]>;
+  update(core: CoreDbContext<S>, tableName: string, data: Partial<unknown>, predicate: (record: KRecord) => boolean): Promise<KRecord[]>;
   delete(core: CoreDbContext<S>, tableName: string, predicate: (record: KRecord) => boolean): Promise<KRecord[]>;
 }
 
@@ -236,7 +236,7 @@ function createOnDemandDbContext<S extends KonroSchema<any, any>>(
     from: <TName extends keyof S['tables']>(tableName: TName): OnDemandChainedQueryBuilder<S, TName, S['base'][TName]> => {
       const createBuilder = <TReturn>(currentDescriptor: QueryDescriptor): OnDemandChainedQueryBuilder<S, TName, TReturn> => ({
         select(fields) { return createBuilder<TReturn>({ ...currentDescriptor, select: fields }); },
-        where(predicate) { return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate as any) }); },
+        where(predicate) { return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate as Parameters<typeof normalizePredicate>[0]) }); },
         withDeleted() { return createBuilder<TReturn>({ ...currentDescriptor, withDeleted: true }); },
         with<W extends WithArgument<S['types'][TName]>>(relations: W) {
           const newWith = { ...currentDescriptor.with, ...(relations as QueryDescriptor['with']) };
@@ -244,18 +244,18 @@ function createOnDemandDbContext<S extends KonroSchema<any, any>>(
         },
         limit(count) { return createBuilder<TReturn>({ ...currentDescriptor, limit: count }); },
         offset(count) { return createBuilder<TReturn>({ ...currentDescriptor, offset: count }); },
-        all: async () => {
+        all: async (): Promise<TReturn[]> => {
           const state = await io.getFullState();
-          return _queryImpl(state, schema, currentDescriptor) as any;
+          return _queryImpl(state, schema, currentDescriptor) as TReturn[];
         },
-        first: async () => {
+        first: async (): Promise<TReturn | null> => {
           const state = await io.getFullState();
-          return (_queryImpl(state, schema, { ...currentDescriptor, limit: 1 })[0] ?? null) as any;
+          return (_queryImpl(state, schema, { ...currentDescriptor, limit: 1 })[0] ?? null) as TReturn | null;
         },
-        aggregate: async (aggregations) => {
+        aggregate: async <TAggs extends Record<string, AggregationDefinition>>(aggregations: TAggs) => {
           const state = await io.getFullState();
           const aggDescriptor: AggregationDescriptor = { ...currentDescriptor, aggregations };
-          return _aggregateImpl(state, schema, aggDescriptor) as any;
+          return _aggregateImpl(state, schema, aggDescriptor) as { [K in keyof TAggs]: number | null };
         },
       });
       return createBuilder<S['base'][TName]>({ tableName: tableName as string });
@@ -267,12 +267,12 @@ function createOnDemandDbContext<S extends KonroSchema<any, any>>(
 
   const update = <T extends keyof S['tables']>(tableName: T): OnDemandUpdateBuilder<S['base'][T], S['create'][T]> => ({
     set: (data) => ({
-      where: (predicate) => io.update(core, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate as any)) as any,
+      where: (predicate) => io.update(core, tableName as string, data, normalizePredicate(predicate as Parameters<typeof normalizePredicate>[0])) as Promise<S['base'][T][]>,
     }),
   });
 
   const del = <T extends keyof S['tables']>(tableName: T): OnDemandDeleteBuilder<S['base'][T]> => ({
-    where: (predicate) => io.delete(core, tableName as string, normalizePredicate(predicate as any)) as any,
+    where: (predicate) => io.delete(core, tableName as string, normalizePredicate(predicate as Parameters<typeof normalizePredicate>[0])) as Promise<S['base'][T][]>,
   });
 
   const notSupported = () => Promise.reject(KonroError("This method is not supported in 'on-demand' mode."));
@@ -338,7 +338,7 @@ export function createDatabase<S extends KonroSchema<any, any>>(
       insert: async (core, tableName, values) => {
         const state = createEmptyStateImpl(schema);
         (state as any)[tableName] = await readTableState(tableName);
-        const [newState, result] = core.insert(state, tableName as keyof S["tables"], values as any);
+        const [newState, result] = core.insert(state, tableName as keyof S['tables'], values as any);
         await writeTableState(tableName, newState[tableName]!);
         return result;
       },
@@ -379,14 +379,14 @@ export function createDatabase<S extends KonroSchema<any, any>>(
         const idCol = getIdColumn(tableName);
 
         // Perform insert without existing records for performance
-        const [newState, inserted] = core.insert({ [tableName]: { records: [], meta } } as any, tableName as keyof S["tables"], values as any);
+        const [newState, inserted] = core.insert({ [tableName]: { records: [], meta } } as any, tableName as keyof S['tables'], values as any);
         const insertedArr = Array.isArray(inserted) ? inserted : (inserted ? [inserted] : []);
         if (insertedArr.length === 0) return inserted;
 
         // Write new records and update meta if it changed
         await fs.mkdir(getTableDir(tableName), { recursive: true });
         const newMeta = newState[tableName]?.meta;
-        const promises = insertedArr.map((r: any) => writeAtomic(getRecordPath(tableName, r[idCol]), serializer.stringify(r), fs));
+        const promises = insertedArr.map((r) => writeAtomic(getRecordPath(tableName, r[idCol]), serializer.stringify(r), fs));
         if (newMeta && newMeta.lastId !== meta.lastId) {
           promises.push(writeAtomic(getMetaPath(tableName), JSON.stringify(newMeta, null, 2), fs));
         }
@@ -424,7 +424,7 @@ export function createDatabase<S extends KonroSchema<any, any>>(
           
           const promises: Promise<void>[] = [];
           if (JSON.stringify(oldTState.meta) !== JSON.stringify(newTState.meta)) {
-            promises.push(fs.mkdir(getTableDir(tName), { recursive: true }).then(() => 
+            promises.push(fs.mkdir(getTableDir(tName), { recursive: true }).then(() =>
               writeAtomic(getMetaPath(tName), JSON.stringify(newTState.meta, null, 2), fs))
             );
           }

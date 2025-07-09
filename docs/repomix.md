@@ -4,7 +4,6 @@ package.json
 src/adapter.ts
 src/db.ts
 src/index.ts
-src/operations.ts
 src/schema.ts
 src/types.ts
 tsconfig.json
@@ -297,7 +296,7 @@ function createStrategy(options: FileAdapterOptions, context: StrategyContext): 
     return createPerRecordStrategy(options.perRecord, context);
   }
   // This case should be prevented by the types, but as a safeguard:
-  throw new KonroError('Invalid file adapter options: missing storage strategy.');
+  throw KonroError('Invalid file adapter options: missing storage strategy.');
 }
 
 /** Creates the strategy for reading/writing the entire database to a single file. */
@@ -325,13 +324,14 @@ function createSingleFileStrategy(options: SingleFileStrategy['single'], context
 
 /** Creates the strategy for reading/writing each table to its own file in a directory. */
 function createMultiFileStrategy(options: MultiFileStrategy['multi'], context: StrategyContext): FileStrategy {
+  const { fs, serializer, fileExtension } = context;
   const parseFile = async <T>(filepath: string, schema?: Record<string, ColumnDefinition<any>>): Promise<T | undefined> => {
     const data = await fs.readFile(filepath);
     if (!data) return undefined;
     try {
       return serializer.parse<T>(data, schema);
     } catch (e: any) {
-      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${options.format} file. Original error: ${e.message}`);
+      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${fileExtension.slice(1)} file. Original error: ${e.message}`);
     }
   };
 
@@ -423,497 +423,6 @@ function createPerRecordStrategy(options: PerRecordStrategy['perRecord'], contex
     }
   };
 }
-```
-
-## File: src/operations.ts
-```typescript
-import { randomUUID } from 'crypto';
-import { DatabaseState, KRecord } from './types';
-import { KonroSchema, RelationDefinition, ColumnDefinition, AggregationDefinition } from './schema';
-import { KonroError, KonroValidationError } from './utils/error.util';
-
-// --- HELPERS ---
-
-
-/** Creates a pristine, empty database state from a schema. */
-export const createEmptyState = <S extends KonroSchema<any, any>>(schema: S): DatabaseState<S> => {
-  const state = {} as DatabaseState<S>;
-  for (const tableName in schema.tables) {
-    // This is a controlled cast, safe because we are iterating over the schema's tables.
-    (state as any)[tableName] = { records: [], meta: { lastId: 0 } };
-  }
-  return state;
-};
-
-// --- QUERY ---
-
-interface WithOptions {
-  select?: Record<string, ColumnDefinition<unknown>>;
-  where?: (record: KRecord) => boolean;
-  with?: WithClause;
-}
-type WithClause = Record<string, boolean | WithOptions>;
-
-export interface QueryDescriptor {
-  tableName: string;
-  select?: Record<string, ColumnDefinition<unknown> | RelationDefinition>;
-  where?: (record: KRecord) => boolean;
-  with?: WithClause;
-  limit?: number;
-  offset?: number;
-  withDeleted?: boolean;
-}
-
-export interface AggregationDescriptor extends QueryDescriptor {
-  aggregations: Record<string, AggregationDefinition>;
-}
-
-const _processWith = <S extends KonroSchema<any, any>>(
-  recordsToProcess: KRecord[],
-  currentTableName: string,
-  withClause: WithClause,
-  schema: S,
-  state: DatabaseState
-): KRecord[] => {
-  // structuredClone is important to avoid mutating the records from the previous recursion level or the main state.
-  const resultsWithRelations = structuredClone(recordsToProcess);
-
-  for (const record of resultsWithRelations) {
-    for (const relationName in withClause) {
-      const relationDef = schema.relations[currentTableName]?.[relationName];
-      if (!relationDef) continue;
-
-      const withOpts = withClause[relationName];
-      // Skip if the value is `false` or something not truthy (though types should prevent this)
-      if (!withOpts) continue;
-
-      const relatedRecords = findRelatedRecords(state, record, relationDef);
-
-      const nestedWhere = typeof withOpts === 'object' ? withOpts.where : undefined;
-      const nestedSelect = typeof withOpts === 'object' ? withOpts.select : undefined;
-      const nestedWith = typeof withOpts === 'object' ? withOpts.with : undefined;
-
-      let processedRelatedRecords = nestedWhere ? relatedRecords.filter(nestedWhere) : [...relatedRecords];
-
-      // Recursively process deeper relations first
-      if (nestedWith && processedRelatedRecords.length > 0) {
-        processedRelatedRecords = _processWith(
-          processedRelatedRecords,
-          relationDef.targetTable,
-          nestedWith,
-          schema,
-          state
-        );
-      }
-
-      // Then, apply select on the (potentially already processed) related records
-      if (nestedSelect) {
-        const targetTableSchema = schema.tables[relationDef.targetTable];
-        if (!targetTableSchema) throw KonroError(`Schema for table "${relationDef.targetTable}" not found.`);
-
-        processedRelatedRecords = processedRelatedRecords.map(rec => {
-          const newRec: KRecord = {};
-          for (const outputKey in nestedSelect) {
-            const def = nestedSelect[outputKey];
-            if (!def) continue;
-            // nested with() does not support selecting relations, only columns, as per spec.
-            if (def._type === 'column') {
-              const colName = Object.keys(targetTableSchema).find(key => targetTableSchema[key] === def);
-              if (colName && rec.hasOwnProperty(colName)) {
-                newRec[outputKey] = rec[colName];
-              }
-            }
-          }
-          return newRec;
-        });
-      }
-
-      // Finally, attach the results to the parent record
-      if (relationDef.relationType === 'one') {
-        record[relationName] = processedRelatedRecords[0] ?? null;
-      } else {
-        record[relationName] = processedRelatedRecords;
-      }
-    }
-  }
-
-  return resultsWithRelations;
-};
-
-export const _queryImpl = <S extends KonroSchema<any, any>>(state: DatabaseState, schema: S, descriptor: QueryDescriptor): KRecord[] => {
-  const tableState = state[descriptor.tableName];
-  if (!tableState) return [];
-
-  const tableSchema = schema.tables[descriptor.tableName];
-  if (!tableSchema) throw KonroError(`Schema for table "${descriptor.tableName}" not found.`);
-  const deletedAtColumn = Object.keys(tableSchema).find(key => tableSchema[key]?.options?._konro_sub_type === 'deletedAt');
-
-  // 1. Filter
-  let results: KRecord[];
-
-  // Auto-filter soft-deleted records unless opted-out
-  if (deletedAtColumn && !descriptor.withDeleted) {
-    results = tableState.records.filter(r => r[deletedAtColumn] === null || r[deletedAtColumn] === undefined);
-  } else {
-    results = [...tableState.records];
-  }
-  
-  results = descriptor.where ? results.filter(descriptor.where) : results;
-
-  // 2. Eager load relations (`with`) - must happen after filtering
-  if (descriptor.with) {
-    results = 
-_processWith(results, descriptor.tableName, descriptor.with, schema, state);
-  }
-
-  // 3. Paginate
-  const offset = descriptor.offset ?? 0;
-  const limit = descriptor.limit ?? results.length;
-  let paginatedResults = results.slice(offset, offset + limit);
-
-  // 4. Select Fields
-  if (descriptor.select) {
-    const relationsSchema = schema.relations[descriptor.tableName] ?? {};
-
-    paginatedResults = paginatedResults.map(rec => {
-      const newRec: KRecord = {};
-      for (const outputKey in descriptor.select!) {
-        const def = descriptor.select![outputKey];
-        if (!def) continue;
-        if (def._type === 'column') {
-          const colName = Object.keys(tableSchema).find(key => tableSchema[key] === def);
-          if (colName && rec.hasOwnProperty(colName)) {
-            newRec[outputKey] = rec[colName];
-          }
-        } else if (def._type === 'relation') {
-          const relName = Object.keys(relationsSchema).find(key => relationsSchema[key] === def);
-          if (relName && rec.hasOwnProperty(relName)) {
-            newRec[outputKey] = rec[relName];
-          }
-        }
-      }
-      return newRec;
-    });
-  }
-
-  return paginatedResults;
-};
-
-const findRelatedRecords = (state: DatabaseState, record: KRecord, relationDef: RelationDefinition) => {
-  const foreignKey = record[relationDef.on];
-  const targetTable = state[relationDef.targetTable];
-
-  if (foreignKey === undefined || !targetTable) return [];
-
-  // one-to-many: 'on' is PK on current table, 'references' is FK on target
-  if (relationDef.relationType === 'many') {
-    return targetTable.records.filter(r => r[relationDef.references] === foreignKey);
-  }
-
-  // many-to-one: 'on' is FK on current table, 'references' is PK on target
-  if (relationDef.relationType === 'one') {
-    return targetTable.records.filter(r => r[relationDef.references] === foreignKey);
-  }
-
-  return [];
-};
-
-// --- AGGREGATION ---
-
-export const _aggregateImpl = <S extends KonroSchema<any, any>>(
-  state: DatabaseState,
-  _schema: S, // Not used but keep for API consistency
-  descriptor: AggregationDescriptor
-): Record<string, number | null> => {
-  const tableState = state[descriptor.tableName];
-  if (!tableState) return {};
-
-  const filteredRecords = descriptor.where ? tableState.records.filter(descriptor.where) : [...tableState.records];
-  const results: Record<string, number | null> = {};
-
-  for (const resultKey in descriptor.aggregations) {
-    const aggDef = descriptor.aggregations[resultKey];
-    if (!aggDef) continue;
-
-    if (aggDef.aggType === 'count') {
-      results[resultKey] = filteredRecords.length;
-      continue;
-    }
-
-    if (!aggDef.column) {
-      throw KonroError(`Aggregation '${aggDef.aggType}' requires a column.`);
-    }
-    const column = aggDef.column;
-
-    const values = filteredRecords.map(r => r[column]).filter(v => typeof v === 'number') as number[];
-
-    if (values.length === 0) {
-      if (aggDef.aggType === 'sum') {
-        results[resultKey] = 0; // sum of empty set is 0
-      } else {
-        results[resultKey] = null; // avg, min, max of empty set is null
-      }
-      continue;
-    }
-
-    switch (aggDef.aggType) {
-      case 'sum':
-        results[resultKey] = values.reduce((sum, val) => sum + val, 0);
-        break;
-      case 'avg':
-        results[resultKey] = values.reduce((sum, val) => sum + val, 0) / values.length;
-        break;
-      case 'min':
-        results[resultKey] = Math.min(...values);
-        break;
-      case 'max':
-        results[resultKey] = Math.max(...values);
-        break;
-    }
-  }
-  return results;
-};
-
-// --- INSERT ---
-
-export const _insertImpl = <S extends KonroSchema<any, any>>(state: DatabaseState, schema: S, tableName: string, values: KRecord[]): [DatabaseState, KRecord[]] => {
-  const oldTableState = state[tableName];
-  if (!oldTableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
-
-  // To maintain immutability, we deep-clone only the table being modified.
-  const tableState = structuredClone(oldTableState);
-  const tableSchema = schema.tables[tableName];
-  if (!tableSchema) throw KonroError(`Schema for table "${tableName}" not found.`);
-  const insertedRecords: KRecord[] = [];
-
-  for (const value of values) {
-    const newRecord: KRecord = { ...value };
-    // Handle IDs and defaults
-    for (const colName in tableSchema) {
-      const colDef = tableSchema[colName];
-      if (colDef.dataType === 'id') {
-        if (newRecord[colName] === undefined) {
-          // Generate new PK if not provided
-          if (colDef.options?._pk_strategy === 'uuid') {
-            newRecord[colName] = randomUUID();
-          } else { // 'auto-increment' or legacy undefined strategy
-            tableState.meta.lastId++;
-            newRecord[colName] = tableState.meta.lastId;
-          }
-        } else {
-          // If user provided an ID for an auto-increment table, update lastId to avoid future collisions.
-          if (colDef.options?._pk_strategy !== 'uuid' && typeof newRecord[colName] === 'number') {
-            tableState.meta.lastId = Math.max(tableState.meta.lastId, newRecord[colName] as number);
-          }
-        }
-      }
-      if (newRecord[colName] === undefined && colDef.options?.default !== undefined) {
-        newRecord[colName] = typeof colDef.options.default === 'function' ? colDef.options.default() : colDef.options.default;
-      }
-    }
-
-    // Validate the record before inserting
-    validateRecord(newRecord, tableSchema, tableState.records);
-
-    tableState.records.push(newRecord);
-    insertedRecords.push(newRecord);
-  }
-
-  const newState = { ...state, [tableName]: tableState };
-  return [newState, insertedRecords];
-};
-
-// --- UPDATE ---
-
-export const _updateImpl = <S extends KonroSchema<any, any>>(state: DatabaseState, schema: S, tableName: string, data: Partial<KRecord>, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
-  const oldTableState = state[tableName];
-  if (!oldTableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
-
-  const tableSchema = schema.tables[tableName];
-  if (!tableSchema) {
-    throw KonroError(`Schema for table "${tableName}" not found.`);
-  }
-
-  const updatedRecords: KRecord[] = [];
-
-  // Auto-update 'updatedAt' timestamp
-  for (const colName of Object.keys(tableSchema)) {
-      if (tableSchema[colName]?.options?._konro_sub_type === 'updatedAt') {
-          (data as KRecord)[colName] = new Date();
-      }
-  }
-
-  const updateData = { ...data };
-  // Find the ID column from the schema and prevent it from being updated.
-  const idColumn = Object.entries(tableSchema).find(([, colDef]) => {
-    return colDef && typeof colDef === 'object' && '_type' in colDef && colDef._type === 'column' && 'dataType' in colDef && colDef.dataType === 'id';
-  })?.[0];
-  if (idColumn && updateData[idColumn] !== undefined) {
-    delete updateData[idColumn];
-  }
-
-  const newRecords = oldTableState.records.map(record => {
-    if (predicate(record)) {
-      const updatedRecord = { ...record, ...updateData };
-
-      // Validate the updated record, excluding current record from unique checks
-      const otherRecords = oldTableState.records.filter(r => r !== record);
-      validateRecord(updatedRecord, tableSchema, otherRecords);
-
-      updatedRecords.push(updatedRecord);
-      return updatedRecord;
-    }
-    return record;
-  });
-
-  if (updatedRecords.length === 0) {
-    return [state, []];
-  }
-
-  const tableState = { ...oldTableState, records: newRecords };
-  const newState = { ...state, [tableName]: tableState };
-
-  return [newState, updatedRecords];
-};
-
-
-// --- DELETE ---
-
-function applyCascades<S extends KonroSchema<any, any>>(
-  state: DatabaseState<S>,
-  schema: S,
-  tableName: string,
-  deletedRecords: KRecord[]
-): DatabaseState<S> {
-  if (deletedRecords.length === 0) {
-    return state;
-  }
-
-  let nextState = state;
-  const relations = schema.relations[tableName] ?? {};
-
-  for (const relationName in relations) {
-    const relationDef = relations[relationName];
-    // We only cascade from the "one" side of a one-to-many relationship, which is a 'many' type in Konro.
-    if (!relationDef || relationDef.relationType !== 'many' || !relationDef.onDelete) {
-      continue;
-    }
-
-    const sourceKey = relationDef.on;
-    const targetTable = relationDef.targetTable;
-    const targetKey = relationDef.references;
-
-    const sourceKeyValues = deletedRecords.map(r => r[sourceKey]).filter(v => v !== undefined);
-    if (sourceKeyValues.length === 0) continue;
-
-    const sourceKeySet = new Set(sourceKeyValues);
-    const predicate = (record: KRecord) => sourceKeySet.has(record[targetKey] as any);
-
-    if (relationDef.onDelete === 'CASCADE') {
-      // Recursively delete
-      const [newState, ] = _deleteImpl(nextState, schema, targetTable, predicate);
-      nextState = newState as DatabaseState<S>;
-    } else if (relationDef.onDelete === 'SET NULL') {
-      // Update FK to null
-      const [newState, ] = _updateImpl(nextState, schema, targetTable, { [targetKey]: null }, predicate);
-      nextState = newState as DatabaseState<S>;
-    }
-  }
-
-  return nextState;
-}
-
-export const _deleteImpl = (state: DatabaseState, schema: KonroSchema<any, any>, tableName: string, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
-  const oldTableState = state[tableName];
-  if (!oldTableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
-  const tableSchema = schema.tables[tableName];
-  if (!tableSchema) throw KonroError(`Schema for table "${tableName}" not found.`);
-
-  const deletedAtColumn = Object.keys(tableSchema).find(key => tableSchema[key]?.options?._konro_sub_type === 'deletedAt');
-
-  // Soft delete path
-  if (deletedAtColumn) {
-    // Use update implementation for soft-delete. It will also handle `updatedAt`.
-    const [baseState, recordsToUpdate] = _updateImpl(
-      state,
-      schema,
-      tableName,
-      { [deletedAtColumn]: new Date() },
-      (record) => !record[deletedAtColumn] && predicate(record)
-    );
-
-    if (recordsToUpdate.length === 0) return [state, []];
-    const finalState = applyCascades(baseState, schema, tableName, recordsToUpdate);
-    // The returned records are the ones that were just soft-deleted from this table.
-    return [finalState, recordsToUpdate];
-  } 
-  
-  // Hard delete path
-  const recordsToDelete: KRecord[] = [];
-  const keptRecords = oldTableState.records.filter(r => predicate(r) ? (recordsToDelete.push(r), false) : true);
-
-  if (recordsToDelete.length === 0) return [state, []];
-
-  const baseState = { ...state, [tableName]: { ...oldTableState, records: keptRecords } };
-  const finalState = applyCascades(baseState, schema, tableName, recordsToDelete);
-
-  return [finalState, recordsToDelete];
-};
-
-// --- VALIDATION ---
-
-const validateRecord = (record: KRecord, tableSchema: Record<string, any>, existingRecords: KRecord[]): void => {
-  for (const [columnName, colDef] of Object.entries(tableSchema)) {
-    if (!colDef || typeof colDef !== 'object' || !('dataType' in colDef)) continue;
-
-    const value = record[columnName];
-    const options = colDef.options || {};
-
-    // Skip validation for undefined values (they should have defaults applied already)
-    if (value === undefined) continue;
-
-    // Validate unique constraint
-    if (options.unique && existingRecords.some(r => r[columnName] === value)) {
-      throw KonroValidationError(`Value '${String(value)}' for column '${columnName}' must be unique`);
-    }
-
-    // Validate string constraints
-    if (colDef.dataType === 'string' && typeof value === 'string') {
-      // Min length
-      if (options.min !== undefined && value.length < options.min) {
-        throw KonroValidationError(`String '${value}' for column '${columnName}' is too short (min: ${options.min})`);
-      }
-
-      // Max length
-      if (options.max !== undefined && value.length > options.max) {
-        throw KonroValidationError(`String '${value}' for column '${columnName}' is too long (max: ${options.max})`);
-      }
-
-      // Format validation
-      if (options.format === 'email' && !isValidEmail(value)) {
-        throw KonroValidationError(`Value '${value}' for column '${columnName}' is not a valid email`);
-      }
-    }
-
-    // Validate number constraints
-    if (colDef.dataType === 'number' && typeof value === 'number') {
-      // Min value
-      if (options.min !== undefined && value < options.min) {
-        throw KonroValidationError(`Number ${value} for column '${columnName}' is too small (min: ${options.min})`);
-      }
-
-      // Max value
-      if (options.max !== undefined && value > options.max) {
-        throw KonroValidationError(`Number ${value} for column '${columnName}' is too large (max: ${options.max})`);
-      }
-    }
-  }
-};
-
-const isValidEmail = (email: string): boolean => {
-  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email);
-};
 ```
 
 ## File: src/db.ts
@@ -1187,12 +696,12 @@ function createOnDemandDbContext<S extends KonroSchema<any, any>>(
 
   const update = <T extends keyof S['tables']>(tableName: T): OnDemandUpdateBuilder<S['base'][T], S['create'][T]> => ({
     set: (data) => ({
-      where: (predicate) => io.update(core, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate as any)),
+      where: (predicate) => io.update(core, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate as any)) as any,
     }),
   });
 
   const del = <T extends keyof S['tables']>(tableName: T): OnDemandDeleteBuilder<S['base'][T]> => ({
-    where: (predicate) => io.delete(core, tableName as string, normalizePredicate(predicate as any)),
+    where: (predicate) => io.delete(core, tableName as string, normalizePredicate(predicate as any)) as any,
   });
 
   const notSupported = () => Promise.reject(KonroError("This method is not supported in 'on-demand' mode."));
@@ -1265,7 +774,7 @@ export function createDatabase<S extends KonroSchema<any, any>>(
       update: async (core, tableName, data, predicate) => {
         const state = createEmptyStateImpl(schema);
         (state as any)[tableName] = await readTableState(tableName);
-        const [newState, result] = core.update(state, tableName as keyof S["tables"]).set(data).where(predicate);
+        const [newState, result] = core.update(state, tableName as keyof S["tables"]).set(data as any).where(predicate);
         if (result.length > 0) await writeTableState(tableName, newState[tableName]!);
         return result as any;
       },
@@ -1315,7 +824,7 @@ export function createDatabase<S extends KonroSchema<any, any>>(
       },
       update: async (core, tableName, data, predicate) => {
         const state = await getFullState(); // Update needs full table state for predicate
-        const [newState, updated] = core.update(state, tableName as keyof S["tables"]).set(data).where(predicate);
+        const [newState, updated] = core.update(state, tableName as keyof S["tables"]).set(data as any).where(predicate);
         if (updated.length === 0) return updated as any;
 
         const idCol = getIdColumn(tableName);

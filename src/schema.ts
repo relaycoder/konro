@@ -107,6 +107,7 @@ export interface BaseRelationDefinition {
   readonly targetTable: string;
   readonly on: string;
   readonly references: string;
+  readonly onDelete?: 'CASCADE' | 'SET NULL';
 }
 
 export interface OneRelationDefinition extends BaseRelationDefinition {
@@ -175,8 +176,14 @@ export const string = (options?: { unique?: boolean; default?: string | (() => s
 export const number = (options?: { unique?: boolean; default?: number | (() => number); min?: number; max?: number; type?: 'integer' }) => createColumn<number>('number', options, 0);
 /** A boolean column. */
 export const boolean = (options?: { default?: boolean | (() => boolean) }) => createColumn<boolean>('boolean', options, false);
-/** A date column, stored as an ISO string but hydrated as a Date object. */
+/** A generic date column. Consider using `createdAt` or `updatedAt` for managed timestamps. */
 export const date = (options?: { default?: Date | (() => Date) }) => createColumn<Date>('date', options, new Date());
+/** A managed timestamp set when a record is created. */
+export const createdAt = (): ColumnDefinition<Date> => createColumn<Date>('date', { _konro_sub_type: 'createdAt', default: () => new Date() }, new Date());
+/** A managed timestamp set when a record is created and updated. */
+export const updatedAt = (): ColumnDefinition<Date> => createColumn<Date>('date', { _konro_sub_type: 'updatedAt', default: () => new Date() }, new Date());
+/** A managed, nullable timestamp for soft-deleting records. */
+export const deletedAt = (): ColumnDefinition<Date | null> => createColumn<Date | null>('date', { _konro_sub_type: 'deletedAt', default: null }, null);
 /** A column for storing arbitrary JSON objects, with a generic for type safety. */
 export const object = <T extends Record<string, any>>(options?: { default?: T | (() => T) }): ColumnDefinition<T> => ({ _type: 'column', dataType: 'object', options });
 
@@ -184,7 +191,7 @@ export const object = <T extends Record<string, any>>(options?: { default?: T | 
 // --- RELATIONSHIP DEFINITION HELPERS ---
 
 /** Defines a `one-to-one` or `many-to-one` relationship. */
-export const one = <T extends string>(targetTable: T, options: { on: string; references: string }): OneRelationDefinition & { targetTable: T } => ({
+export const one = <T extends string>(targetTable: T, options: { on: string; references: string; onDelete?: 'CASCADE' | 'SET NULL' }): OneRelationDefinition & { targetTable: T } => ({
   _type: 'relation',
   relationType: 'one',
   targetTable,
@@ -192,7 +199,7 @@ export const one = <T extends string>(targetTable: T, options: { on: string; ref
 });
 
 /** Defines a `one-to-many` relationship. */
-export const many = <T extends string>(targetTable: T, options: { on: string; references: string }): ManyRelationDefinition & { targetTable: T } => ({
+export const many = <T extends string>(targetTable: T, options: { on: string; references: string; onDelete?: 'CASCADE' | 'SET NULL' }): ManyRelationDefinition & { targetTable: T } => ({
   _type: 'relation',
   relationType: 'many',
   targetTable,

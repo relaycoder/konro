@@ -32,6 +32,7 @@ export interface QueryDescriptor {
   with?: WithClause;
   limit?: number;
   offset?: number;
+  withDeleted?: boolean;
 }
 
 export interface AggregationDescriptor extends QueryDescriptor {
@@ -114,12 +115,26 @@ export const _queryImpl = <S extends KonroSchema<any, any>>(state: DatabaseState
   const tableState = state[descriptor.tableName];
   if (!tableState) return [];
 
-  // 1. Filter
-  let results = descriptor.where ? tableState.records.filter(descriptor.where) : [...tableState.records];
+  const tableSchema = schema.tables[descriptor.tableName];
+  if (!tableSchema) throw KonroError(`Schema for table "${descriptor.tableName}" not found.`);
+  const deletedAtColumn = Object.keys(tableSchema).find(key => tableSchema[key]?.options?._konro_sub_type === 'deletedAt');
 
-  // 2. Eager load relations (`with`)
+  // 1. Filter
+  let results: KRecord[];
+
+  // Auto-filter soft-deleted records unless opted-out
+  if (deletedAtColumn && !descriptor.withDeleted) {
+    results = tableState.records.filter(r => r[deletedAtColumn] === null || r[deletedAtColumn] === undefined);
+  } else {
+    results = [...tableState.records];
+  }
+  
+  results = descriptor.where ? results.filter(descriptor.where) : results;
+
+  // 2. Eager load relations (`with`) - must happen after filtering
   if (descriptor.with) {
-    results = _processWith(results, descriptor.tableName, descriptor.with, schema, state);
+    results = 
+_processWith(results, descriptor.tableName, descriptor.with, schema, state);
   }
 
   // 3. Paginate
@@ -129,9 +144,7 @@ export const _queryImpl = <S extends KonroSchema<any, any>>(state: DatabaseState
 
   // 4. Select Fields
   if (descriptor.select) {
-    const tableSchema = schema.tables[descriptor.tableName];
     const relationsSchema = schema.relations[descriptor.tableName] ?? {};
-    if (!tableSchema) throw KonroError(`Schema for table "${descriptor.tableName}" not found.`);
 
     paginatedResults = paginatedResults.map(rec => {
       const newRec: KRecord = {};
@@ -294,6 +307,13 @@ export const _updateImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
 
   const updatedRecords: KRecord[] = [];
 
+  // Auto-update 'updatedAt' timestamp
+  for (const colName of Object.keys(tableSchema)) {
+      if (tableSchema[colName]?.options?._konro_sub_type === 'updatedAt') {
+          (data as KRecord)[colName] = new Date();
+      }
+  }
+
   const updateData = { ...data };
   // Find the ID column from the schema and prevent it from being updated.
   const idColumn = Object.entries(tableSchema).find(([, colDef]) => {
@@ -330,26 +350,91 @@ export const _updateImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
 
 // --- DELETE ---
 
-export const _deleteImpl = (state: DatabaseState, tableName: string, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
-  const oldTableState = state[tableName];
-  if (!oldTableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
-  const deletedRecords: KRecord[] = [];
-
-  const keptRecords = oldTableState.records.filter(record => {
-    if (predicate(record)) {
-      deletedRecords.push(record);
-      return false;
-    }
-    return true;
-  });
-
+function applyCascades<S extends KonroSchema<any, any>>(
+  state: DatabaseState<S>,
+  schema: S,
+  tableName: string,
+  deletedRecords: KRecord[]
+): DatabaseState<S> {
   if (deletedRecords.length === 0) {
-    return [state, []];
+    return state;
   }
 
-  const tableState = { ...oldTableState, records: keptRecords };
-  const newState = { ...state, [tableName]: tableState };
-  return [newState, deletedRecords];
+  let nextState = state;
+  const relations = schema.relations[tableName] ?? {};
+
+  for (const relationName in relations) {
+    const relationDef = relations[relationName];
+    // We only cascade from the "one" side of a one-to-many relationship, which is a 'many' type in Konro.
+    if (!relationDef || relationDef.relationType !== 'many' || !relationDef.onDelete) {
+      continue;
+    }
+
+    const sourceKey = relationDef.on;
+    const targetTable = relationDef.targetTable;
+    const targetKey = relationDef.references;
+
+    const sourceKeyValues = deletedRecords.map(r => r[sourceKey]).filter(v => v !== undefined);
+    if (sourceKeyValues.length === 0) continue;
+
+    const sourceKeySet = new Set(sourceKeyValues);
+    const predicate = (record: KRecord) => sourceKeySet.has(record[targetKey] as any);
+
+    if (relationDef.onDelete === 'CASCADE') {
+      // Recursively delete
+      const [newState, ] = _deleteImpl(nextState, schema, targetTable, predicate);
+      nextState = newState as DatabaseState<S>;
+    } else if (relationDef.onDelete === 'SET NULL') {
+      // Update FK to null
+      const [newState, ] = _updateImpl(nextState, schema, targetTable, { [targetKey]: null }, predicate);
+      nextState = newState as DatabaseState<S>;
+    }
+  }
+
+  return nextState;
+}
+
+export const _deleteImpl = (state: DatabaseState, schema: KonroSchema<any, any>, tableName: string, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
+  const oldTableState = state[tableName];
+  if (!oldTableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
+  const tableSchema = schema.tables[tableName];
+  if (!tableSchema) throw KonroError(`Schema for table "${tableName}" not found.`);
+
+  const deletedAtColumn = Object.keys(tableSchema).find(key => tableSchema[key]?.options?._konro_sub_type === 'deletedAt');
+
+  // Soft delete path
+  if (deletedAtColumn) {
+    const recordsToUpdate: KRecord[] = [];
+    const now = new Date();
+
+    const newRecords = oldTableState.records.map(record => {
+      if (!record[deletedAtColumn] && predicate(record)) { // Not already soft-deleted and matches predicate
+        const updatedRecord = { ...record, [deletedAtColumn]: now };
+        recordsToUpdate.push(updatedRecord);
+        return updatedRecord;
+      }
+      return record;
+    });
+
+    if (recordsToUpdate.length === 0) return [state, []];
+
+    const baseState = { ...state, [tableName]: { ...oldTableState, records: newRecords } };
+    const finalState = applyCascades(baseState, schema, tableName, recordsToUpdate);
+    
+    // The returned records are the ones that were just soft-deleted from this table.
+    return [finalState, recordsToUpdate];
+  } 
+  
+  // Hard delete path
+  const recordsToDelete: KRecord[] = [];
+  const keptRecords = oldTableState.records.filter(r => predicate(r) ? (recordsToDelete.push(r), false) : true);
+
+  if (recordsToDelete.length === 0) return [state, []];
+
+  const baseState = { ...state, [tableName]: { ...oldTableState, records: keptRecords } };
+  const finalState = applyCascades(baseState, schema, tableName, recordsToDelete);
+
+  return [finalState, recordsToDelete];
 };
 
 // --- VALIDATION ---

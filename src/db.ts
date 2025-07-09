@@ -64,6 +64,7 @@ type InferColumnType<C> = C extends ColumnDefinition<infer T> ? T : never;
 interface ChainedQueryBuilder<S extends KonroSchema<any, any>, TName extends keyof S['tables'], TReturn> {
   select(fields: Record<string, ColumnDefinition<unknown> | RelationDefinition>): this;
   where(predicate: Partial<S['base'][TName]> | ((record: S['base'][TName]) => boolean)): this;
+  withDeleted(): this;
   with<W extends WithArgument<S['types'][TName]>>(relations: W): ChainedQueryBuilder<S, TName, TReturn & ResolveWith<S, TName, W>>;
   limit(count: number): this;
   offset(count: number): this;
@@ -108,6 +109,7 @@ export interface InMemoryDbContext<S extends KonroSchema<any, any>> {
 interface OnDemandChainedQueryBuilder<S extends KonroSchema<any, any>, TName extends keyof S['tables'], TReturn> {
   select(fields: Record<string, ColumnDefinition<unknown> | RelationDefinition>): this;
   where(predicate: Partial<S['base'][TName]> | ((record: S['base'][TName]) => boolean)): this;
+  withDeleted(): this;
   with<W extends WithArgument<S['types'][TName]>>(relations: W): OnDemandChainedQueryBuilder<S, TName, TReturn & ResolveWith<S, TName, W>>;
   limit(count: number): this;
   offset(count: number): this;
@@ -162,6 +164,7 @@ function createCoreDbContext<S extends KonroSchema<any, any>>(schema: S) {
       const createBuilder = <TReturn>(currentDescriptor: QueryDescriptor): ChainedQueryBuilder<S, TName, TReturn> => ({
         select(fields) { return createBuilder<TReturn>({ ...currentDescriptor, select: fields }); },
         where(predicate) { return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate as any) }); },
+        withDeleted() { return createBuilder<TReturn>({ ...currentDescriptor, withDeleted: true }); },
         with<W extends WithArgument<S['types'][TName]>>(relations: W) {
           const newWith = { ...currentDescriptor.with, ...(relations as QueryDescriptor['with']) };
           return createBuilder<TReturn & ResolveWith<S, TName, W>>({ ...currentDescriptor, with: newWith });
@@ -199,7 +202,7 @@ function createCoreDbContext<S extends KonroSchema<any, any>>(schema: S) {
 
   const del = <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): DeleteBuilder<S, S['base'][T]> => ({
     where: (predicate) => {
-      const [newState, deletedRecords] = _deleteImpl(state as DatabaseState, tableName as string, normalizePredicate(predicate as any));
+      const [newState, deletedRecords] = _deleteImpl(state as DatabaseState, schema, tableName as string, normalizePredicate(predicate as any));
       return [newState as DatabaseState<S>, deletedRecords as S['base'][T][]];
     },
   });
@@ -268,6 +271,7 @@ function createMultiFileOnDemandDbContext<S extends KonroSchema<any, any>>(
       const createBuilder = <TReturn>(currentDescriptor: QueryDescriptor): OnDemandChainedQueryBuilder<S, TName, TReturn> => ({
         select(fields) { return createBuilder<TReturn>({ ...currentDescriptor, select: fields }); },
         where(predicate) { return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate as any) }); },
+        withDeleted() { return createBuilder<TReturn>({ ...currentDescriptor, withDeleted: true }); },
         with<W extends WithArgument<S['types'][TName]>>(relations: W) {
           const newWith = { ...currentDescriptor.with, ...(relations as QueryDescriptor['with']) };
           return createBuilder<TReturn & ResolveWith<S, TName, W>>({ ...currentDescriptor, with: newWith });
@@ -302,7 +306,20 @@ function createMultiFileOnDemandDbContext<S extends KonroSchema<any, any>>(
   });
 
   const del = <T extends keyof S['tables']>(tableName: T): OnDemandDeleteBuilder<S['base'][T]> => ({
-    where: (predicate) => performCud(tableName as string, (state) => core.delete(state, tableName).where(predicate as any)) as Promise<S['base'][T][]>,
+    where: async (predicate) => {
+      // Cascading deletes require the full state.
+      const state = await getFullState();
+      const [newState, deletedRecords] = core.delete(state, tableName).where(predicate as any);
+
+      // Find changed tables and write them back
+      const changedTableNames = Object.keys(newState).filter(key => newState[key as keyof typeof newState] !== state[key as keyof typeof state]);
+      
+      await Promise.all(
+        changedTableNames.map(name => writeTableState(name, newState[name as keyof typeof newState]!))
+      );
+
+      return deletedRecords as S['base'][T][];
+    },
   });
 
   const notSupported = () => Promise.reject(KonroError("This method is not supported in 'on-demand' mode."));
@@ -386,6 +403,7 @@ function createPerRecordOnDemandDbContext<S extends KonroSchema<any, any>>(
       const createBuilder = <TReturn>(currentDescriptor: QueryDescriptor): OnDemandChainedQueryBuilder<S, TName, TReturn> => ({
         select(fields) { return createBuilder<TReturn>({ ...currentDescriptor, select: fields }); },
         where(predicate) { return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate as any) }); },
+        withDeleted() { return createBuilder<TReturn>({ ...currentDescriptor, withDeleted: true }); },
         with<W extends WithArgument<S['types'][TName]>>(relations: W) {
           const newWith = { ...currentDescriptor.with, ...(relations as QueryDescriptor['with']) };
           return createBuilder<TReturn & ResolveWith<S, TName, W>>({ ...currentDescriptor, with: newWith });
@@ -460,14 +478,45 @@ function createPerRecordOnDemandDbContext<S extends KonroSchema<any, any>>(
 
   const del = <T extends keyof S['tables']>(tableName: T): OnDemandDeleteBuilder<S['base'][T]> => ({
     where: async (predicate) => {
-      const tableNameStr = tableName as string;
-      const tableState = await readTableState(tableNameStr);
-      const idColumn = getIdColumn(tableNameStr);
-      const [, deletedRecords] = core.delete({ [tableNameStr]: tableState } as any, tableName).where(predicate as any);
+      const state = await getFullState();
+      const [newState, deletedRecords] = core.delete(state, tableName).where(predicate as any);
 
-      if (deletedRecords.length > 0) {
-        await Promise.all((deletedRecords as KRecord[]).map((rec) => fs.unlink(getRecordPath(tableNameStr, rec[idColumn] as any))));
+      const changePromises: Promise<any>[] = [];
+
+      for (const tName of Object.keys(schema.tables)) {
+        const oldTableState = state[tName as keyof typeof state]!;
+        const newTableState = newState[tName as keyof typeof newState]!;
+
+        if (oldTableState === newTableState) continue;
+
+        const tableDir = getTableDir(tName);
+        changePromises.push(fs.mkdir(tableDir, { recursive: true }));
+
+        if (JSON.stringify(oldTableState.meta) !== JSON.stringify(newTableState.meta)) {
+          changePromises.push(writeMeta(tName, newTableState.meta));
+        }
+
+        const tIdColumn = getIdColumn(tName);
+        const oldRecordsMap = new Map(oldTableState.records.map(r => [r[tIdColumn], r]));
+        const newRecordsMap = new Map(newTableState.records.map(r => [r[tIdColumn], r]));
+        
+        for (const [id, record] of newRecordsMap.entries()) {
+            const oldRecord = oldRecordsMap.get(id);
+            // Write if new or record object identity has changed
+            if (!oldRecord || oldRecord !== record) {
+                changePromises.push(writeAtomic(getRecordPath(tName, id as any), serializer.stringify(record), fs));
+            }
+        }
+        
+        for (const id of oldRecordsMap.keys()) {
+            if (!newRecordsMap.has(id)) { // Deleted record
+                changePromises.push(fs.unlink(getRecordPath(tName, id as any)));
+            }
+        }
       }
+
+      await Promise.all(changePromises);
+
       return deletedRecords as S['base'][T][];
     },
   });

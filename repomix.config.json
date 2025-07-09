@@ -25,11 +25,14 @@
   "include": [
     "package.json",
     "tsconfig.json",
-    "src",
-    // "test/unit/Schema/ColumnHelpers.test.ts",
+    // "src",
+    "src/adapter.ts",
+    "src/db.ts",
+    "src/index.ts",
     // "test/e2e",
-    // "test/util.ts",
-    "README.md"
+    "test/util.ts",
+    "test/integration",
+    // "README.md"
     // "test/integration/Adapters/OnDemand.test.ts"
 
   ],

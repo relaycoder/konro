@@ -40,7 +40,7 @@ describe('Integration > Adapters > OnDemand', () => {
           mode: 'on-demand',
           single: { filepath: path.join(dbDirPath, 'db.json') },
         });
-      }).toThrow(KonroError("The 'on-demand' mode requires the 'multi-file' storage strategy."));
+      }).toThrow(KonroError("The 'on-demand' mode requires the 'multi-file' or 'per-record' storage strategy."));
     });
   });
 

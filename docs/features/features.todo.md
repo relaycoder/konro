@@ -1,3 +1,9 @@
+####
+
+should add to record field of auto-fill createdAt and updatedAt also optionally deletedAt feature for all strategy
+
+####
+
 konro error codes. code and description list should be in separated ts file
 
 ####

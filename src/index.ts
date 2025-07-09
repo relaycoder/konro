@@ -3,27 +3,43 @@ import { createFileAdapter } from './adapter';
 import { createSchema, id, uuid, string, number, boolean, date, createdAt, updatedAt, deletedAt, object, one, many, count, sum, avg, min, max } from './schema';
 
 export type {
-  // Core Schema & DB Types
+  // --- Core & Schema ---
   KonroSchema,
-  DbContext,
-  InMemoryDbContext,
-  OnDemandDbContext,
   DatabaseState,
   KRecord,
-  // Schema Definition Types
+  // Schema Definition
   ColumnDefinition,
   RelationDefinition,
   OneRelationDefinition,
   ManyRelationDefinition,
+  BaseRelationDefinition,
   AggregationDefinition,
-  // Adapter & FS Types
+
+  // --- DB Contexts ---
+  DbContext,
+  InMemoryDbContext,
+  OnDemandDbContext,
+
+  // --- Fluent Query Builders ---
+  QueryBuilder,
+  ChainedQueryBuilder,
+  UpdateBuilder,
+  DeleteBuilder,
+  OnDemandQueryBuilder,
+  OnDemandChainedQueryBuilder,
+  OnDemandUpdateBuilder,
+  OnDemandDeleteBuilder,
+  WithArgument,
+
+  // --- Adapters & I/O ---
   StorageAdapter,
-  FileAdapterOptions,
   FileStorageAdapter,
+  FileAdapterOptions,
   SingleFileStrategy,
   MultiFileStrategy,
   PerRecordStrategy,
   FsProvider,
+  Serializer,
 } from './types';
 
 /**

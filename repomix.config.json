@@ -30,8 +30,10 @@
     // "test"
 
     "src/types.ts",
+    "src/index.ts",
     "src/db.ts",
-    "src/schema.ts"
+    "src/schema.ts",
+    "src/operations.ts"
 
     // "test/integration/InMemoryFlow/CrudCycle.test.ts",
     // "test/integration/Adapters/PerRecord.test.ts",

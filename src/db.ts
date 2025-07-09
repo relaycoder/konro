@@ -212,192 +212,26 @@ function createCoreDbContext<S extends KonroSchema<any, any>>(schema: S) {
 
 // --- ON-DEMAND CONTEXT (STATEFUL WRAPPER) ---
 
-function createMultiFileOnDemandDbContext<S extends KonroSchema<any, any>>(
-  schema: S,
-  adapter: FileStorageAdapter,
-  core: ReturnType<typeof createCoreDbContext<S>>
-): OnDemandDbContext<S> {
-  const { dir } = adapter.options.multi!;
+type CoreDbContext<S extends KonroSchema<any, any>> = ReturnType<typeof createCoreDbContext<S>>;
 
-  const readTableState = async (tableName: string): Promise<TableState> => {
-    const filepath = path.join(dir, `${tableName}${adapter.fileExtension}`);
-    const data = await adapter.fs.readFile(filepath);
-    if (!data) return { records: [], meta: { lastId: 0 } };
-    try {
-      return adapter.serializer.parse(data, schema.tables[tableName]);
-    } catch (e: any) {
-      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${adapter.options.format} file. Original error: ${e.message}`);
-    }
-  };
-
-  const writeTableState = async (tableName: string, tableState: TableState): Promise<void> => {
-    await adapter.fs.mkdir(dir, { recursive: true });
-    const filepath = path.join(dir, `${tableName}${adapter.fileExtension}`);
-    const content = adapter.serializer.stringify(tableState);
-    await writeAtomic(filepath, content, adapter.fs);
-  };
-  
-  // For queries with relations, we need the full state.
-  const getFullState = async (): Promise<DatabaseState<S>> => {
-    const state = createEmptyStateImpl(schema);
-    await Promise.all(Object.keys(schema.tables).map(async (tableName) => {
-      (state as any)[tableName] = await readTableState(tableName);
-    }));
-    return state;
-  }
-
-  // A generic handler for CUD operations that reads one table, performs an action, and writes it back.
-  const performCud = async <TResult>(tableName: string, action: (state: DatabaseState<S>) => [DatabaseState<S>, TResult]): Promise<TResult> => {
-    const state = createEmptyStateImpl(schema);
-    (state as any)[tableName] = await readTableState(tableName);
-    const [newState, result] = action(state as DatabaseState<S>);
-    
-    // Check if the operation produced a result (e.g., an array of inserted/updated/deleted records)
-    const hasChanges = Array.isArray(result) ? result.length > 0 : result !== null;
-    if (hasChanges) {
-      const newTableState = newState[tableName as string];
-      // This check satisfies the `noUncheckedIndexedAccess` compiler option.
-      // Our CUD logic ensures this state will always exist after a change.
-      if (newTableState) {
-        await writeTableState(tableName, newTableState);
-      }
-    }
-    return result;
-  };
-
-  const query = (): OnDemandQueryBuilder<S> => ({
-    from: <TName extends keyof S['tables']>(tableName: TName): OnDemandChainedQueryBuilder<S, TName, S['base'][TName]> => {
-      // The query builder for on-demand must be separate because its terminal methods are async.
-      const createBuilder = <TReturn>(currentDescriptor: QueryDescriptor): OnDemandChainedQueryBuilder<S, TName, TReturn> => ({
-        select(fields) { return createBuilder<TReturn>({ ...currentDescriptor, select: fields }); },
-        where(predicate) { return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate as any) }); },
-        withDeleted() { return createBuilder<TReturn>({ ...currentDescriptor, withDeleted: true }); },
-        with<W extends WithArgument<S['types'][TName]>>(relations: W) {
-          const newWith = { ...currentDescriptor.with, ...(relations as QueryDescriptor['with']) };
-          return createBuilder<TReturn & ResolveWith<S, TName, W>>({ ...currentDescriptor, with: newWith });
-        },
-        limit(count) { return createBuilder<TReturn>({ ...currentDescriptor, limit: count }); },
-        offset(count) { return createBuilder<TReturn>({ ...currentDescriptor, offset: count }); },
-        all: async (): Promise<TReturn[]> => {
-          const state = await getFullState();
-          return _queryImpl(state, schema, currentDescriptor) as any;
-        },
-        first: async (): Promise<TReturn | null> => {
-          const state = await getFullState();
-          return (_queryImpl(state, schema, { ...currentDescriptor, limit: 1 })[0] ?? null) as any;
-        },
-        aggregate: async (aggregations) => {
-          const state = await getFullState();
-          const aggDescriptor: AggregationDescriptor = { ...currentDescriptor, aggregations };
-          return _aggregateImpl(state, schema, aggDescriptor) as any;
-        },
-      });
-      return createBuilder<S['base'][TName]>({ tableName: tableName as string });
-    },
-  });
-
-  const insert = <T extends keyof S['tables']>(tableName: T, values: S['create'][T] | Readonly<S['create'][T]>[]): Promise<any> => 
-    performCud(tableName as string, (state) => core.insert(state, tableName, values as any));
-
-  const update = <T extends keyof S['tables']>(tableName: T): OnDemandUpdateBuilder<S['base'][T], S['create'][T]> => ({
-    set: (data) => ({
-      where: (predicate) => performCud(tableName as string, (state) => core.update(state, tableName).set(data).where(predicate as any)) as Promise<S['base'][T][]>,
-    }),
-  });
-
-  const del = <T extends keyof S['tables']>(tableName: T): OnDemandDeleteBuilder<S['base'][T]> => ({
-    where: async (predicate) => {
-      // Cascading deletes require the full state.
-      const state = await getFullState();
-      const [newState, deletedRecords] = core.delete(state, tableName).where(predicate as any);
-
-      // Find changed tables and write them back
-      const changedTableNames = Object.keys(newState).filter(key => newState[key as keyof typeof newState] !== state[key as keyof typeof state]);
-      
-      await Promise.all(
-        changedTableNames.map(name => writeTableState(name, newState[name as keyof typeof newState]!))
-      );
-
-      return deletedRecords as S['base'][T][];
-    },
-  });
-
-  const notSupported = () => Promise.reject(KonroError("This method is not supported in 'on-demand' mode."));
-
-  return {
-    schema,
-    adapter,
-    read: notSupported,
-    write: notSupported,
-    createEmptyState: () => createEmptyStateImpl(schema),
-    query,
-    insert,
-    update,
-    delete: del,
-  };
+/** Defines the contract for file I/O operations in on-demand mode. */
+interface OnDemandIO<S extends KonroSchema<any, any>> {
+  getFullState(): Promise<DatabaseState<S>>;
+  insert(core: CoreDbContext<S>, tableName: string, values: any): Promise<any>;
+  update(core: CoreDbContext<S>, tableName: string, data: Partial<KRecord>, predicate: (record: KRecord) => boolean): Promise<KRecord[]>;
+  delete(core: CoreDbContext<S>, tableName: string, predicate: (record: KRecord) => boolean): Promise<KRecord[]>;
 }
 
-function createPerRecordOnDemandDbContext<S extends KonroSchema<any, any>>(
+/**
+ * Creates a generic, unified `OnDemandDbContext` from an I/O strategy.
+ * This function is the key to removing duplication between 'multi-file' and 'per-record' modes.
+ */
+function createOnDemandDbContext<S extends KonroSchema<any, any>>(
   schema: S,
-  adapter: FileStorageAdapter,
-  core: ReturnType<typeof createCoreDbContext<S>>
+  adapter: StorageAdapter,
+  core: CoreDbContext<S>,
+  io: OnDemandIO<S>
 ): OnDemandDbContext<S> {
-  const { dir } = adapter.options.perRecord!;
-  const { fs, serializer, fileExtension } = adapter;
-
-  const getTableDir = (tableName: string) => path.join(dir, tableName);
-  const getRecordPath = (tableName: string, recordId: string | number) => path.join(getTableDir(tableName), `${recordId}${fileExtension}`);
-  const getMetaPath = (tableName: string) => path.join(getTableDir(tableName), '_meta.json');
-
-  const getIdColumn = (tableName: string) => {
-    const tableSchema = schema.tables[tableName];
-    const idColumn = Object.keys(tableSchema).find((key) => tableSchema[key]?.dataType === 'id');
-    if (!idColumn) {
-      throw KonroError(`Table "${tableName}" must have an 'id' column to be used with 'per-record' storage.`);
-    }
-    return idColumn;
-  };
-
-  const readMeta = async (tableName: string): Promise<{ lastId: number }> => {
-    const metaContent = await fs.readFile(getMetaPath(tableName));
-    return metaContent ? JSON.parse(metaContent) : { lastId: 0 };
-  };
-
-  const writeMeta = async (tableName: string, meta: { lastId: number }): Promise<void> => {
-    await fs.mkdir(getTableDir(tableName), { recursive: true });
-    await writeAtomic(getMetaPath(tableName), JSON.stringify(meta, null, 2), fs);
-  };
-
-  const readTableState = async (tableName: string): Promise<TableState> => {
-    const tableDir = getTableDir(tableName);
-    await fs.mkdir(tableDir, { recursive: true });
-
-    const meta = await readMeta(tableName);
-    const files = await fs.readdir(tableDir);
-    const recordFiles = files.filter((f) => !f.startsWith('_meta'));
-
-    const records = (
-      await Promise.all(
-        recordFiles.map(async (file) => {
-          const content = await fs.readFile(path.join(tableDir, file));
-          return content ? serializer.parse<KRecord>(content) : null;
-        })
-      )
-    ).filter((r): r is KRecord => r !== null);
-
-    return { records, meta };
-  };
-
-  const getFullState = async (): Promise<DatabaseState<S>> => {
-    const state = createEmptyStateImpl(schema);
-    await Promise.all(
-      Object.keys(schema.tables).map(async (tableName) => {
-        (state as any)[tableName] = await readTableState(tableName);
-      })
-    );
-    return state;
-  };
-
   const query = (): OnDemandQueryBuilder<S> => ({
     from: <TName extends keyof S['tables']>(tableName: TName): OnDemandChainedQueryBuilder<S, TName, S['base'][TName]> => {
       const createBuilder = <TReturn>(currentDescriptor: QueryDescriptor): OnDemandChainedQueryBuilder<S, TName, TReturn> => ({
@@ -410,16 +244,16 @@ function createPerRecordOnDemandDbContext<S extends KonroSchema<any, any>>(
         },
         limit(count) { return createBuilder<TReturn>({ ...currentDescriptor, limit: count }); },
         offset(count) { return createBuilder<TReturn>({ ...currentDescriptor, offset: count }); },
-        all: async (): Promise<TReturn[]> => {
-          const state = await getFullState();
+        all: async () => {
+          const state = await io.getFullState();
           return _queryImpl(state, schema, currentDescriptor) as any;
         },
-        first: async (): Promise<TReturn | null> => {
-          const state = await getFullState();
+        first: async () => {
+          const state = await io.getFullState();
           return (_queryImpl(state, schema, { ...currentDescriptor, limit: 1 })[0] ?? null) as any;
         },
         aggregate: async (aggregations) => {
-          const state = await getFullState();
+          const state = await io.getFullState();
           const aggDescriptor: AggregationDescriptor = { ...currentDescriptor, aggregations };
           return _aggregateImpl(state, schema, aggDescriptor) as any;
         },
@@ -428,97 +262,17 @@ function createPerRecordOnDemandDbContext<S extends KonroSchema<any, any>>(
     },
   });
 
-  const insert = async <T extends keyof S['tables']>(tableName: T, values: S['create'][T] | Readonly<S['create'][T]>[]): Promise<any> => {
-    const tableNameStr = tableName as string;
-    const meta = await readMeta(tableNameStr);
-    const idColumn = getIdColumn(tableNameStr);
-
-    // We only need a shallow table state for insert, no records needed for validation context.
-    const tempState: DatabaseState = { [tableNameStr]: { records: [], meta } };
-    const [newState, insertedResult] = core.insert(tempState as any, tableName, values as any);
-
-    const insertedAsArray = Array.isArray(insertedResult) ? insertedResult : insertedResult ? [insertedResult] : [];
-
-    if (insertedAsArray.length === 0) {
-      return insertedResult; // Return original empty array or null
-    }
-
-    await Promise.all(
-      (insertedAsArray as KRecord[]).map((rec) => {
-        const recordPath = getRecordPath(tableNameStr, rec[idColumn] as any);
-        return writeAtomic(recordPath, serializer.stringify(rec), fs);
-      })
-    );
-
-    const newMeta = (newState as DatabaseState)[tableNameStr]?.meta;
-    if (newMeta && newMeta.lastId !== meta.lastId) {
-      await writeMeta(tableNameStr, newMeta);
-    }
-
-    return insertedResult;
-  };
+  const insert = <T extends keyof S['tables']>(tableName: T, values: S['create'][T] | Readonly<S['create'][T]>[]): Promise<any> =>
+    io.insert(core, tableName as string, values);
 
   const update = <T extends keyof S['tables']>(tableName: T): OnDemandUpdateBuilder<S['base'][T], S['create'][T]> => ({
     set: (data) => ({
-      where: async (predicate) => {
-        const tableNameStr = tableName as string;
-        const tableState = await readTableState(tableNameStr);
-        const idColumn = getIdColumn(tableNameStr);
-        const [, updatedRecords] = core.update({ [tableNameStr]: tableState } as any, tableName).set(data).where(predicate as any);
-
-        if (updatedRecords.length > 0) {
-          await Promise.all(
-            (updatedRecords as KRecord[]).map((rec) => writeAtomic(getRecordPath(tableNameStr, rec[idColumn] as any), serializer.stringify(rec), fs))
-          );
-        }
-        return updatedRecords as S['base'][T][];
-      },
+      where: (predicate) => io.update(core, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate as any)) as any,
     }),
   });
 
   const del = <T extends keyof S['tables']>(tableName: T): OnDemandDeleteBuilder<S['base'][T]> => ({
-    where: async (predicate) => {
-      const state = await getFullState();
-      const [newState, deletedRecords] = core.delete(state, tableName).where(predicate as any);
-
-      const changePromises: Promise<any>[] = [];
-
-      for (const tName of Object.keys(schema.tables)) {
-        const oldTableState = state[tName as keyof typeof state]!;
-        const newTableState = newState[tName as keyof typeof newState]!;
-
-        if (oldTableState === newTableState) continue;
-
-        const tableDir = getTableDir(tName);
-        changePromises.push(fs.mkdir(tableDir, { recursive: true }));
-
-        if (JSON.stringify(oldTableState.meta) !== JSON.stringify(newTableState.meta)) {
-          changePromises.push(writeMeta(tName, newTableState.meta));
-        }
-
-        const tIdColumn = getIdColumn(tName);
-        const oldRecordsMap = new Map(oldTableState.records.map(r => [r[tIdColumn], r]));
-        const newRecordsMap = new Map(newTableState.records.map(r => [r[tIdColumn], r]));
-        
-        for (const [id, record] of newRecordsMap.entries()) {
-            const oldRecord = oldRecordsMap.get(id);
-            // Write if new or record object identity has changed
-            if (!oldRecord || oldRecord !== record) {
-                changePromises.push(writeAtomic(getRecordPath(tName, id as any), serializer.stringify(record), fs));
-            }
-        }
-        
-        for (const id of oldRecordsMap.keys()) {
-            if (!newRecordsMap.has(id)) { // Deleted record
-                changePromises.push(fs.unlink(getRecordPath(tName, id as any)));
-            }
-        }
-      }
-
-      await Promise.all(changePromises);
-
-      return deletedRecords as S['base'][T][];
-    },
+    where: (predicate) => io.delete(core, tableName as string, normalizePredicate(predicate as any)) as any,
   });
 
   const notSupported = () => Promise.reject(KonroError("This method is not supported in 'on-demand' mode."));
@@ -541,23 +295,158 @@ export function createDatabase<S extends KonroSchema<any, any>>(
   const { schema, adapter } = options;
   const core = createCoreDbContext(schema);
 
-  if (adapter.mode === 'on-demand') {
-    const fileAdapter = adapter as FileStorageAdapter; // We can be sure it's a FileStorageAdapter due to checks
-    if (fileAdapter.options.multi) {
-      return createMultiFileOnDemandDbContext(schema, fileAdapter, core);
-    }
-    if (fileAdapter.options.perRecord) {
-      return createPerRecordOnDemandDbContext(schema, fileAdapter, core);
-    }
-    throw KonroError("The 'on-demand' mode requires a 'multi-file' or 'per-record' storage strategy.");
+  // --- In-Memory Mode ---
+  if (adapter.mode === 'in-memory') {
+    return {
+      ...core,
+      schema, adapter,
+      read: () => adapter.read(schema),
+      write: (state) => adapter.write(state, schema),
+      createEmptyState: () => createEmptyStateImpl(schema),
+    } as InMemoryDbContext<S>;
   }
 
-  // For in-memory, just combine the core logic with the adapter and I/O methods.
-  return {
-    ...core,
-    schema, adapter,
-    read: () => adapter.read(schema),
-    write: (state) => adapter.write(state, schema),
-    createEmptyState: () => createEmptyStateImpl(schema),
-  } as InMemoryDbContext<S>;
+  // --- On-Demand Mode ---
+  const fileAdapter = adapter as FileStorageAdapter; // We can be sure it's a FileStorageAdapter due to checks
+  const { fs, serializer, fileExtension } = fileAdapter;
+
+  // The `read` method from the adapter provides the canonical way to get the full state.
+  const getFullState = (): Promise<DatabaseState<S>> => adapter.read(schema);
+  
+  // --- I/O Strategy for Multi-File ---
+  const createMultiFileIO = (): OnDemandIO<S> => {
+    const { dir } = fileAdapter.options.multi!;
+    const getTablePath = (tableName: string) => path.join(dir, `${tableName}${fileExtension}`);
+
+    const readTableState = async (tableName: string): Promise<TableState> => {
+      const data = await fs.readFile(getTablePath(tableName));
+      if (!data) return { records: [], meta: { lastId: 0 } };
+      try {
+        return serializer.parse(data, schema.tables[tableName]);
+      } catch (e: any) {
+        throw KonroStorageError(`Failed to parse file at "${getTablePath(tableName)}". Original error: ${e.message}`);
+      }
+    };
+
+    const writeTableState = async (tableName: string, tableState: TableState): Promise<void> => {
+      await fs.mkdir(dir, { recursive: true });
+      await writeAtomic(getTablePath(tableName), serializer.stringify(tableState), fs);
+    };
+
+    return {
+      getFullState,
+      insert: async (core, tableName, values) => {
+        const state = createEmptyStateImpl(schema);
+        (state as any)[tableName] = await readTableState(tableName);
+        const [newState, result] = core.insert(state, tableName as keyof S["tables"], values as any);
+        await writeTableState(tableName, newState[tableName]!);
+        return result;
+      },
+      update: async (core, tableName, data, predicate) => {
+        const state = createEmptyStateImpl(schema);
+        (state as any)[tableName] = await readTableState(tableName);
+        const [newState, result] = core.update(state, tableName as keyof S["tables"]).set(data as any).where(predicate);
+        if (result.length > 0) await writeTableState(tableName, newState[tableName]!);
+        return result as any;
+      },
+      delete: async (core, tableName, predicate) => {
+        const state = await getFullState(); // Cascades require full state
+        const [newState, deletedRecords] = core.delete(state, tableName as keyof S["tables"]).where(predicate);
+        const changedTables = Object.keys(newState).filter(k => newState[k as keyof typeof newState] !== state[k as keyof typeof state]);
+        await Promise.all(changedTables.map(t => writeTableState(t, newState[t as keyof typeof newState]!)));
+        return deletedRecords as any;
+      },
+    };
+  };
+
+  // --- I/O Strategy for Per-Record ---
+  const createPerRecordIO = (): OnDemandIO<S> => {
+    const { dir } = fileAdapter.options.perRecord!;
+    const getTableDir = (tableName: string) => path.join(dir, tableName);
+    const getRecordPath = (tableName: string, id: any) => path.join(getTableDir(tableName), `${id}${fileExtension}`);
+    const getMetaPath = (tableName: string) => path.join(getTableDir(tableName), '_meta.json');
+    const getIdColumn = (tableName: string) => {
+      const col = Object.keys(schema.tables[tableName]).find(k => schema.tables[tableName][k]?.dataType === 'id');
+      if (!col) throw KonroError(`Table "${tableName}" needs an 'id' column for 'per-record' mode.`);
+      return col;
+    };
+
+    return {
+      getFullState,
+      insert: async (core, tableName, values) => {
+        const metaContent = await fs.readFile(getMetaPath(tableName)).catch(() => null);
+        const meta = metaContent ? JSON.parse(metaContent) : { lastId: 0 };
+        const idCol = getIdColumn(tableName);
+
+        // Perform insert without existing records for performance
+        const [newState, inserted] = core.insert({ [tableName]: { records: [], meta } } as any, tableName as keyof S["tables"], values as any);
+        const insertedArr = Array.isArray(inserted) ? inserted : (inserted ? [inserted] : []);
+        if (insertedArr.length === 0) return inserted;
+
+        // Write new records and update meta if it changed
+        await fs.mkdir(getTableDir(tableName), { recursive: true });
+        const newMeta = newState[tableName]?.meta;
+        const promises = insertedArr.map((r: any) => writeAtomic(getRecordPath(tableName, r[idCol]), serializer.stringify(r), fs));
+        if (newMeta && newMeta.lastId !== meta.lastId) {
+          promises.push(writeAtomic(getMetaPath(tableName), JSON.stringify(newMeta, null, 2), fs));
+        }
+        await Promise.all(promises);
+        return inserted;
+      },
+      update: async (core, tableName, data, predicate) => {
+        const state = await getFullState(); // Update needs full table state for predicate
+        const [newState, updated] = core.update(state, tableName as keyof S["tables"]).set(data as any).where(predicate);
+        if (updated.length === 0) return updated as any;
+
+        const idCol = getIdColumn(tableName);
+        await Promise.all(updated.map((r: any) => writeAtomic(getRecordPath(tableName, r[idCol]), serializer.stringify(r), fs)));
+        
+        const newMeta = newState[tableName]?.meta;
+        const oldMeta = state[tableName as keyof typeof state]?.meta;
+        if (newMeta && JSON.stringify(newMeta) !== JSON.stringify(oldMeta)) {
+            await writeAtomic(getMetaPath(tableName), JSON.stringify(newMeta, null, 2), fs);
+        }
+        return updated as any;
+      },
+      delete: async (core, tableName, predicate) => {
+        const oldState = await getFullState();
+        const [newState, deletedRecords] = core.delete(oldState, tableName as keyof S["tables"]).where(predicate);
+        if (deletedRecords.length === 0) return deletedRecords as any;
+
+        const changes = Object.keys(schema.tables).map(async tName => {
+          const oldTState = oldState[tName as keyof typeof oldState]!;
+          const newTState = newState[tName as keyof typeof newState]!;
+          if (oldTState === newTState) return;
+
+          const idCol = getIdColumn(tName);
+          const oldMap = new Map(oldTState.records.map((r: any) => [r[idCol], r]));
+          const newMap = new Map(newTState.records.map((r: any) => [r[idCol], r]));
+          
+          const promises: Promise<void>[] = [];
+          if (JSON.stringify(oldTState.meta) !== JSON.stringify(newTState.meta)) {
+            promises.push(fs.mkdir(getTableDir(tName), { recursive: true }).then(() => 
+              writeAtomic(getMetaPath(tName), JSON.stringify(newTState.meta, null, 2), fs))
+            );
+          }
+          newMap.forEach((rec, id) => {
+            if (oldMap.get(id) !== rec) promises.push(writeAtomic(getRecordPath(tName, id), serializer.stringify(rec), fs));
+          });
+          oldMap.forEach((_rec, id) => {
+            if (!newMap.has(id)) promises.push(fs.unlink(getRecordPath(tName, id)));
+          });
+          await Promise.all(promises);
+        });
+
+        await Promise.all(changes);
+        return deletedRecords as any;
+      },
+    };
+  };
+
+  const io = fileAdapter.options.multi ? createMultiFileIO() : fileAdapter.options.perRecord ? createPerRecordIO() : null;
+  if (!io) {
+    throw KonroError("The 'on-demand' mode requires a 'multi-file' or 'per-record' storage strategy.");
+  }
+  
+  return createOnDemandDbContext(schema, adapter, core, io);
 }

@@ -3,893 +3,14 @@
 package.json
 src/adapter.ts
 src/db.ts
-src/fs.ts
 src/index.ts
 src/operations.ts
 src/schema.ts
 src/types.ts
-src/utils/constants.ts
-src/utils/error.util.ts
-src/utils/predicate.util.ts
-src/utils/serializer.util.ts
-test/unit/Core/Aggregate.test.ts
-test/unit/Core/Delete.test.ts
-test/unit/Core/Insert.test.ts
-test/unit/Core/Query-With.test.ts
-test/unit/Core/Query.test.ts
-test/unit/Core/Update.test.ts
-test/unit/Schema/ColumnHelpers.test.ts
-test/unit/Schema/CreateSchema.test.ts
-test/unit/Schema/RelationHelpers.test.ts
-test/unit/Validation/Constraints.test.ts
 tsconfig.json
 ```
 
 # Files
-
-## File: src/utils/constants.ts
-```typescript
-export const TEMP_FILE_SUFFIX = '.tmp';
-```
-
-## File: src/utils/predicate.util.ts
-```typescript
-import { KRecord } from '../types';
-
-/** Creates a predicate function from a partial object for equality checks, avoiding internal casts. */
-export const createPredicateFromPartial = <T extends KRecord>(partial: Partial<T>): ((record: T) => boolean) => {
-  // `Object.keys` is cast because TypeScript types it as `string[]` instead of `(keyof T)[]`.
-  const keys = Object.keys(partial) as (keyof T)[];
-  return (record: T): boolean => keys.every(key => record[key] === partial[key]);
-};
-```
-
-## File: test/unit/Core/Aggregate.test.ts
-```typescript
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { testSchema } from '../../util';
-import { _aggregateImpl } from '../../../src/operations';
-import { DatabaseState } from '../../../src/types';
-import { konro } from '../../../src/index';
-
-describe('Unit > Core > Aggregate', () => {
-  let testState: DatabaseState;
-
-  beforeEach(() => {
-    testState = {
-      users: {
-        records: [
-          { id: 1, name: 'Alice', age: 30, isActive: true },
-          { id: 2, name: 'Bob', age: 25, isActive: true },
-          { id: 3, name: 'Charlie', age: 42, isActive: false },
-          { id: 4, name: 'Denise', age: 30, isActive: true },
-          { id: 5, name: 'Edward', age: null, isActive: true }, // age can be null
-        ],
-        meta: { lastId: 5 },
-      },
-      posts: { records: [], meta: { lastId: 0 } },
-      profiles: { records: [], meta: { lastId: 0 } },
-      tags: { records: [], meta: { lastId: 0 } },
-      posts_tags: { records: [], meta: { lastId: 0 } },
-    };
-  });
-
-  it('should correctly count all records in a table', () => {
-    const result = _aggregateImpl(testState, testSchema, {
-      tableName: 'users',
-      aggregations: { total: konro.count() }
-    });
-    expect(result.total).toBe(5);
-  });
-
-  it('should correctly count records matching a where clause', () => {
-    const result = _aggregateImpl(testState, testSchema, {
-      tableName: 'users',
-      where: (r) => r.isActive === true,
-      aggregations: { activeUsers: konro.count() }
-    });
-    expect(result.activeUsers).toBe(4);
-  });
-
-  it('should correctly sum a numeric column', () => {
-    const result = _aggregateImpl(testState, testSchema, {
-      tableName: 'users',
-      aggregations: { totalAge: konro.sum('age') }
-    });
-    // 30 + 25 + 42 + 30 = 127
-    expect(result.totalAge).toBe(127);
-  });
-
-  it('should correctly calculate the average of a numeric column', () => {
-    const result = _aggregateImpl(testState, testSchema, {
-      tableName: 'users',
-      aggregations: { averageAge: konro.avg('age') }
-    });
-    // 127 / 4 = 31.75
-    expect(result.averageAge).toBe(31.75);
-  });
-
-  it('should find the minimum value in a numeric column', () => {
-    const result = _aggregateImpl(testState, testSchema, {
-      tableName: 'users',
-      aggregations: { minAge: konro.min('age') }
-    });
-    expect(result.minAge).toBe(25);
-  });
-
-  it('should find the maximum value in a numeric column', () => {
-    const result = _aggregateImpl(testState, testSchema, {
-      tableName: 'users',
-      aggregations: { maxAge: konro.max('age') }
-    });
-    expect(result.maxAge).toBe(42);
-  });
-
-  it('should handle multiple aggregations in one call', () => {
-    const result = _aggregateImpl(testState, testSchema, {
-      tableName: 'users',
-      where: (r) => r.isActive === true,
-      aggregations: {
-        count: konro.count(),
-        avgAge: konro.avg('age'), // Alice(30), Bob(25), Denise(30) -> 85 / 3
-      }
-    });
-    expect(result.count).toBe(4); // Includes Edward with null age
-    expect(result.avgAge).toBeCloseTo(85 / 3);
-  });
-
-  it('should return 0 for count on an empty/filtered-out set', () => {
-    const result = _aggregateImpl(testState, testSchema, {
-      tableName: 'users',
-      where: (r) => (r.age as number) > 100,
-      aggregations: { count: konro.count() }
-    });
-    expect(result.count).toBe(0);
-  });
-
-  it('should return 0 for sum on an empty set', () => {
-    const result = _aggregateImpl(testState, testSchema, {
-      tableName: 'users',
-      where: (r) => (r.age as number) > 100,
-      aggregations: { sumAge: konro.sum('age') }
-    });
-    expect(result.sumAge).toBe(0);
-  });
-
-  it('should return null for avg, min, and max on an empty set', () => {
-    const result = _aggregateImpl(testState, testSchema, {
-      tableName: 'users',
-      where: (r) => (r.age as number) > 100,
-      aggregations: {
-        avgAge: konro.avg('age'),
-        minAge: konro.min('age'),
-        maxAge: konro.max('age'),
-      }
-    });
-    expect(result.avgAge).toBeNull();
-    expect(result.minAge).toBeNull();
-    expect(result.maxAge).toBeNull();
-  });
-
-  it('should ignore non-numeric and null values in calculations', () => {
-    const result = _aggregateImpl(testState, testSchema, {
-      tableName: 'users',
-      aggregations: {
-        count: konro.count(),
-        sum: konro.sum('age'),
-        avg: konro.avg('age'),
-        min: konro.min('age'),
-        max: konro.max('age'),
-      }
-    });
-    // There are 5 users, but only 4 have numeric ages.
-    // The implementation of avg/sum/min/max filters for numbers.
-    // The count is for all records matching where.
-    expect(result.count).toBe(5);
-    expect(result.sum).toBe(127);
-    expect(result.avg).toBe(31.75);
-    expect(result.min).toBe(25);
-    expect(result.max).toBe(42);
-  });
-});
-```
-
-## File: test/unit/Schema/RelationHelpers.test.ts
-```typescript
-import { describe, it, expect } from 'bun:test';
-import { konro } from '../../../src/index';
-
-describe('Unit > Schema > RelationHelpers', () => {
-  it('should create a valid one-to-many relationship definition object when calling konro.many()', () => {
-    const manyRel = konro.many('posts', { on: 'id', references: 'authorId' });
-    expect(manyRel).toEqual({
-      _type: 'relation',
-      relationType: 'many',
-      targetTable: 'posts',
-      on: 'id',
-      references: 'authorId',
-    });
-  });
-
-  it('should create a valid one-to-one/many-to-one relationship definition object when calling konro.one()', () => {
-    const oneRel = konro.one('users', { on: 'authorId', references: 'id' });
-    expect(oneRel).toEqual({
-      _type: 'relation',
-      relationType: 'one',
-      targetTable: 'users',
-      on: 'authorId',
-      references: 'id',
-    });
-  });
-});
-```
-
-## File: src/fs.ts
-```typescript
-import { promises as fs } from 'fs';
-import path from 'path';
-import { TEMP_FILE_SUFFIX } from './utils/constants';
-
-export interface FsProvider {
-  readFile(filepath: string): Promise<string | null>;
-  writeFile(filepath: string, content: string, encoding: 'utf-8'): Promise<void>;
-  rename(oldPath: string, newPath: string): Promise<void>;
-  mkdir(dir: string, options: { recursive: true }): Promise<string | undefined>;
-  readdir(dir: string): Promise<string[]>;
-  unlink(filepath: string): Promise<void>;
-}
-
-export const defaultFsProvider: FsProvider = {
-  readFile: async (filepath: string): Promise<string | null> => {
-    try {
-      return await fs.readFile(filepath, 'utf-8');
-    } catch (error: any) {
-      if (error.code === 'ENOENT') {
-        return null;
-      }
-      throw error;
-    }
-  },
-  writeFile: (filepath: string, content: string, encoding: 'utf-8'): Promise<void> => {
-    return fs.writeFile(filepath, content, encoding);
-  },
-  rename: fs.rename,
-  mkdir: fs.mkdir,
-  readdir: fs.readdir,
-  unlink: fs.unlink,
-};
-
-export const writeAtomic = async (
-  filepath: string,
-  content: string,
-  fsProvider: FsProvider,
-): Promise<void> => {
-    // Adding Date.now() for uniqueness in case of concurrent operations
-    const tempFilepath = `${filepath}.${Date.now()}${TEMP_FILE_SUFFIX}`;
-    await fsProvider.mkdir(path.dirname(filepath), { recursive: true });
-    await fsProvider.writeFile(tempFilepath, content, 'utf-8');
-    await fsProvider.rename(tempFilepath, filepath);
-};
-```
-
-## File: src/utils/error.util.ts
-```typescript
-// Per user request: no classes. Using constructor functions for errors.
-const createKonroError = (name: string) => {
-  function KonroErrorConstructor(message: string) {
-    const error = new Error(message);
-    error.name = name;
-    Object.setPrototypeOf(error, KonroErrorConstructor.prototype);
-    return error;
-  }
-  Object.setPrototypeOf(KonroErrorConstructor.prototype, Error.prototype);
-  return KonroErrorConstructor;
-};
-
-/** Base constructor for all Konro-specific errors. */
-export const KonroError = createKonroError('KonroError');
-
-/** Thrown for storage adapter-related issues. */
-export const KonroStorageError = createKonroError('KonroStorageError');
-
-/** Thrown for schema validation errors. */
-export const KonroValidationError = createKonroError('KonroValidationError');
-
-/** Thrown when a resource is not found. */
-export const KonroNotFoundError = createKonroError('KonroNotFoundError');
-```
-
-## File: test/unit/Core/Insert.test.ts
-```typescript
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { testSchema } from '../../util';
-import { _insertImpl } from '../../../src/operations';
-import { DatabaseState } from '../../../src/types';
-
-describe('Unit > Core > Insert', () => {
-    let emptyState: DatabaseState;
-
-    beforeEach(() => {
-        emptyState = {
-            users: { records: [], meta: { lastId: 0 } },
-            posts: { records: [], meta: { lastId: 10 } },
-            profiles: { records: [], meta: { lastId: 0 } },
-            tags: { records: [], meta: { lastId: 0 } },
-            posts_tags: { records: [], meta: { lastId: 0 } },
-        };
-    });
-
-    it('should return a new state object, not mutate the original state, on insert', () => {
-        const originalState = structuredClone(emptyState);
-        const [newState] = _insertImpl(emptyState, testSchema, 'users', [{ name: 'Test', email: 'test@test.com', age: 25 }]);
-        
-        expect(newState).not.toBe(originalState);
-        expect(originalState.users!.records.length).toBe(0);
-        expect(newState.users!.records.length).toBe(1);
-    });
-
-    it('should correctly increment the lastId in the table meta', () => {
-        const [newState] = _insertImpl(emptyState, testSchema, 'users', [{ name: 'Test', email: 'test@test.com', age: 25 }]);
-        expect(newState.users!.meta.lastId).toBe(1);
-
-        const [finalState] = _insertImpl(newState, testSchema, 'users', [{ name: 'Test2', email: 'test2@test.com', age: 30 }]);
-        expect(finalState.users!.meta.lastId).toBe(2);
-    });
-
-    it('should assign the new id to the inserted record', () => {
-        const [newState, inserted] = _insertImpl(emptyState, testSchema, 'posts', [{ title: 'My Post', content: '...', authorId: 1 }]);
-        expect(newState.posts!.meta.lastId).toBe(11);
-        expect(inserted[0]!.id).toBe(11);
-        expect(newState.posts!.records[0]!.id).toBe(11);
-    });
-
-    it('should apply default values for fields that are not provided', () => {
-        const [newState, inserted] = _insertImpl(emptyState, testSchema, 'users', [{ name: 'Default User', email: 'default@test.com', age: 30 }]);
-        expect(inserted[0]!.isActive).toBe(true);
-        expect(newState.users!.records[0]!.isActive).toBe(true);
-    });
-
-    it('should apply default values from a function call, like for dates', () => {
-        const before = new Date();
-        const [newState, inserted] = _insertImpl(emptyState, testSchema, 'posts', [{ title: 'Dated Post', content: '...', authorId: 1 }]);
-        const after = new Date();
-
-        const publishedAt = inserted[0]!.publishedAt as Date;
-        expect(publishedAt).toBeInstanceOf(Date);
-        expect(publishedAt.getTime()).toBeGreaterThanOrEqual(before.getTime());
-        expect(publishedAt.getTime()).toBeLessThanOrEqual(after.getTime());
-        expect(newState.posts!.records[0]!.publishedAt).toEqual(publishedAt);
-    });
-
-    it('should successfully insert multiple records in a single call', () => {
-        const usersToInsert = [
-            { name: 'User A', email: 'a@test.com', age: 21 },
-            { name: 'User B', email: 'b@test.com', age: 22 },
-        ];
-        const [newState, inserted] = _insertImpl(emptyState, testSchema, 'users', usersToInsert);
-
-        expect(newState.users!.records.length).toBe(2);
-        expect(inserted.length).toBe(2);
-        expect(newState.users!.meta.lastId).toBe(2);
-        expect(inserted[0]!.id).toBe(1);
-        expect(inserted[1]!.id).toBe(2);
-        expect(inserted[0]!.name).toBe('User A');
-        expect(inserted[1]!.name).toBe('User B');
-    });
-
-    it('should return both the new state and the newly created record(s) in the result tuple', () => {
-        const userToInsert = { name: 'Single', email: 'single@test.com', age: 40 };
-        const [newState, inserted] = _insertImpl(emptyState, testSchema, 'users', [userToInsert]);
-        
-        expect(newState).toBeDefined();
-        expect(inserted).toBeInstanceOf(Array);
-        expect(inserted.length).toBe(1);
-        expect(inserted[0]!.name).toBe('Single');
-        expect(inserted[0]!.id).toBe(1);
-    });
-});
-```
-
-## File: test/unit/Schema/CreateSchema.test.ts
-```typescript
-import { describe, it, expect } from 'bun:test';
-import { konro } from '../../../src/index';
-
-describe('Unit > Schema > CreateSchema', () => {
-  it('should correctly assemble a full schema object from tables and relations definitions', () => {
-    const tableDefs = {
-      users: {
-        id: konro.id(),
-        name: konro.string(),
-      },
-      posts: {
-        id: konro.id(),
-        title: konro.string(),
-        authorId: konro.number(),
-      },
-    };
-
-    const schema = konro.createSchema({
-      tables: tableDefs,
-      relations: () => ({
-        users: {
-          posts: konro.many('posts', { on: 'id', references: 'authorId' }),
-        },
-        posts: {
-          author: konro.one('users', { on: 'authorId', references: 'id' }),
-        },
-      }),
-    });
-
-    expect(schema.tables).toBe(tableDefs);
-    expect(schema.relations).toBeDefined();
-    expect(schema.relations.users.posts).toBeDefined();
-    expect(schema.relations.posts.author).toBeDefined();
-    expect(schema.types).toBeNull(); // Runtime placeholder
-  });
-
-  it('should handle schemas with no relations defined', () => {
-    const tableDefs = {
-      logs: {
-        id: konro.id(),
-        message: konro.string(),
-      },
-    };
-
-    const schema = konro.createSchema({
-      tables: tableDefs,
-    });
-
-    expect(schema.tables).toBe(tableDefs);
-    expect(schema.relations).toEqual({});
-  });
-
-  it('should handle schemas where relations function returns an empty object', () => {
-    const tableDefs = {
-      users: {
-        id: konro.id(),
-        name: konro.string(),
-      },
-    };
-
-    const schema = konro.createSchema({
-      tables: tableDefs,
-      relations: () => ({}),
-    });
-
-    expect(schema.tables).toBe(tableDefs);
-    expect(schema.relations).toEqual({});
-  });
-
-  it('should handle schemas with multiple relations on one table', () => {
-    const tableDefs = {
-      users: { id: konro.id(), name: konro.string() },
-      posts: { id: konro.id(), title: konro.string(), authorId: konro.number(), editorId: konro.number() },
-    };
-
-    const schema = konro.createSchema({
-      tables: tableDefs,
-      relations: () => ({
-        posts: {
-          author: konro.one('users', { on: 'authorId', references: 'id' }),
-          editor: konro.one('users', { on: 'editorId', references: 'id' }),
-        },
-      }),
-    });
-
-    expect(schema.relations.posts.author).toBeDefined();
-    expect(schema.relations.posts.editor).toBeDefined();
-    expect(schema.relations.posts.author.targetTable).toBe('users');
-    expect(schema.relations.posts.editor.targetTable).toBe('users');
-  });
-});
-```
-
-## File: test/unit/Validation/Constraints.test.ts
-```typescript
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { testSchema } from '../../util';
-import { _insertImpl, _updateImpl } from '../../../src/operations';
-import { DatabaseState } from '../../../src/types';
-import { KonroValidationError } from '../../../src/utils/error.util';
-
-describe('Unit > Validation > Constraints', () => {
-    let testState: DatabaseState;
-
-    beforeEach(() => {
-        testState = {
-            users: {
-                records: [{ id: 1, name: 'Alice', email: 'alice@example.com', age: 30, isActive: true }],
-                meta: { lastId: 1 },
-            },
-            posts: { records: [], meta: { lastId: 0 } },
-            profiles: { records: [], meta: { lastId: 0 } },
-            tags: { records: [], meta: { lastId: 0 } },
-            posts_tags: { records: [], meta: { lastId: 0 } },
-        };
-    });
-
-    // NOTE: These tests are expected to fail until validation is implemented in core operations.
-    // This is intentional to highlight the missing functionality as per the test plan.
-    
-    it('should throw a KonroValidationError when inserting a record with a non-unique value', () => {
-        const user = { name: 'Bob', email: 'alice@example.com', age: 25 };
-        // This should throw because 'alice@example.com' is already used and `email` is unique.
-        expect(() => _insertImpl(testState, testSchema, 'users', [user])).toThrow(KonroValidationError);
-    });
-
-    it('should throw a KonroValidationError for a string that violates a format: email constraint', () => {
-        const user = { name: 'Bob', email: 'bob@invalid', age: 25 };
-        // This should throw because the email format is invalid.
-        expect(() => _insertImpl(testState, testSchema, 'users', [user])).toThrow(KonroValidationError);
-    });
-
-    it('should throw a KonroValidationError for a number smaller than the specified min', () => {
-        const user = { name: 'Bob', email: 'bob@example.com', age: 17 }; // age.min is 18
-        // This should throw because age is below min.
-        expect(() => _insertImpl(testState, testSchema, 'users', [user])).toThrow(KonroValidationError);
-    });
-
-    it('should throw a KonroValidationError for a string shorter than the specified min', () => {
-        const user = { name: 'B', email: 'bob@example.com', age: 25 }; // name.min is 2
-        // This should throw because name is too short.
-        expect(() => _insertImpl(testState, testSchema, 'users', [user])).toThrow(KonroValidationError);
-    });
-    
-    it('should throw a KonroValidationError on update for a non-unique value', () => {
-        // Add another user to create conflict
-        testState.users!.records.push({ id: 2, name: 'Charlie', email: 'charlie@example.com', age: 40, isActive: true });
-        testState.users!.meta.lastId = 2;
-
-        const predicate = (r: any) => r.id === 2;
-        const data = { email: 'alice@example.com' }; // Try to update charlie's email to alice's
-
-        expect(() => _updateImpl(testState, testSchema, 'users', data, predicate)).toThrow(KonroValidationError);
-    });
-});
-```
-
-## File: test/unit/Core/Delete.test.ts
-```typescript
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { _deleteImpl } from '../../../src/operations';
-import { DatabaseState, KRecord } from '../../../src/types';
-import { KonroSchema } from '../../../src/schema';
-
-describe('Unit > Core > Delete', () => {
-    let testState: DatabaseState;
-    const mockSchema: KonroSchema<any, any> = {
-        tables: {
-            users: { 
-                id: { dataType: 'id' } as any, 
-                name: {} as any, 
-                email: {} as any, 
-                age: {} as any, 
-                deletedAt: { options: { _konro_sub_type: 'deletedAt' } } as any 
-            },
-            posts: { 
-                id: { dataType: 'id' } as any, 
-                title: {} as any, 
-                userId: {} as any 
-            },
-            profiles: { records: [], meta: { lastId: 0 } },
-            tags: { records: [], meta: { lastId: 0 } },
-            posts_tags: { records: [], meta: { lastId: 0 } },
-        },
-        relations: {
-            users: {
-                posts: { 
-                    _type: 'relation', 
-                    relationType: 'many', 
-                    targetTable: 'posts', 
-                    on: 'id', 
-                    references: 'userId', 
-                    onDelete: 'CASCADE' 
-                }
-            }
-        },
-        types: {} as any,
-        base: {} as any,
-        create: {} as any,
-    };
-    
-    const hardDeleteSchema: KonroSchema<any, any> = {
-        ...mockSchema,
-        tables: {
-            ...mockSchema.tables,
-            users: { id: { dataType: 'id' } as any, name: {} as any, email: {} as any, age: {} as any },
-        }
-    };
-
-    beforeEach(() => {
-        testState = {
-            users: {
-                records: [
-                    { id: 1, name: 'Alice', email: 'a@a.com', age: 30, deletedAt: null },
-                    { id: 2, name: 'Bob', email: 'b@b.com', age: 25, deletedAt: null },
-                    { id: 3, name: 'Charlie', email: 'c@c.com', age: 42, deletedAt: null },
-                ],
-                meta: { lastId: 3 },
-            },
-            posts: { 
-                records: [
-                    { id: 101, title: 'Post A', userId: 1 },
-                    { id: 102, title: 'Post B', userId: 2 },
-                    { id: 103, title: 'Post C', userId: 1 },
-                ], 
-                meta: { lastId: 103 } 
-            },
-            profiles: { records: [], meta: { lastId: 0 } },
-            tags: { records: [], meta: { lastId: 0 } },
-            posts_tags: { records: [], meta: { lastId: 0 } },
-        };
-    });
-
-    it('should return a new state object, not mutate the original state, on hard delete', () => {
-        const originalState = structuredClone(testState);
-        const [newState] = _deleteImpl(testState, hardDeleteSchema, 'users', (r) => r.id === 1);
-        
-        expect(newState).not.toBe(originalState);
-        expect(originalState.users!.records.length).toBe(3);
-        expect(newState.users!.records.length).toBe(2);
-    });
-
-    it('should only hard delete records that match the predicate function', () => {
-        const [newState, deleted] = _deleteImpl(testState, hardDeleteSchema, 'users', (r) => typeof r.age === 'number' && r.age > 35);
-        
-        expect(deleted.length).toBe(1);
-        expect(deleted[0]!.id).toBe(3);
-        expect(newState.users!.records.length).toBe(2);
-        expect(newState.users!.records.find(u => u.id === 3)).toBeUndefined();
-    });
-
-    it('should return both the new state and an array of the full, hard-deleted records in the result tuple', () => {
-        const [newState, deleted] = _deleteImpl(testState, hardDeleteSchema, 'users', (r) => r.id === 2);
-
-        expect(newState).toBeDefined();
-        expect(deleted).toBeInstanceOf(Array);
-        expect(deleted.length).toBe(1);
-        expect(deleted[0]!).toEqual({ id: 2, name: 'Bob', email: 'b@b.com', age: 25, deletedAt: null });
-    });
-
-    it('should not modify the table meta lastId on delete', () => {
-        const [newState] = _deleteImpl(testState, hardDeleteSchema, 'users', (r) => r.id === 3);
-        expect(newState.users!.meta.lastId).toBe(3);
-    });
-
-    it('should soft delete a record by setting deletedAt if the column exists in schema', () => {
-        const [newState, deleted] = _deleteImpl(testState, mockSchema, 'users', (r) => r.id === 2);
-
-        expect(newState.users!.records.length).toBe(3); // Record is not removed
-        const deletedUser = newState.users!.records.find(u => u.id === 2);
-        expect(deletedUser?.deletedAt).toBeInstanceOf(Date);
-        
-        expect(deleted.length).toBe(1);
-        expect(deleted[0]!.id).toBe(2);
-        expect(deleted[0]!.deletedAt).toEqual(deletedUser?.deletedAt);
-    });
-
-    it('should not soft delete an already soft-deleted record', () => {
-        (testState.users!.records[1] as KRecord).deletedAt = new Date('2024-01-01');
-        const [newState, deleted] = _deleteImpl(testState, mockSchema, 'users', (r) => r.id === 2);
-
-        expect(newState).toBe(testState); // Should return original state as nothing changed
-        expect(deleted.length).toBe(0);
-        expect((newState.users!.records[1] as KRecord).deletedAt).toEqual(new Date('2024-01-01'));
-    });
-
-    it('should perform a cascading delete on related records', () => {
-        const [newState, deletedUsers] = _deleteImpl(testState, mockSchema, 'users', (r) => r.id === 1);
-        
-        expect(deletedUsers.length).toBe(1);
-        expect(newState.users!.records.find(u => u.id === 1)?.deletedAt).toBeInstanceOf(Date);
-        
-        // Check that posts by user 1 are also gone (hard delete, as posts have no deletedAt)
-        const postsForUser1 = newState.posts!.records.filter(p => p.userId === 1);
-        expect(postsForUser1.length).toBe(0);
-
-        // Check that other posts are unaffected
-        expect(newState.posts!.records.length).toBe(1);
-        expect(newState.posts!.records[0]!.id).toBe(102);
-    });
-});
-```
-
-## File: test/unit/Core/Query.test.ts
-```typescript
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { testSchema } from '../../util';
-import { _queryImpl } from '../../../src/operations';
-import { DatabaseState } from '../../../src/types';
-
-describe('Unit > Core > Query', () => {
-    let testState: DatabaseState;
-
-    beforeEach(() => {
-        testState = {
-            users: {
-                records: [
-                    { id: 1, name: 'Alice', age: 30, isActive: true },
-                    { id: 2, name: 'Bob', age: 25, isActive: true },
-                    { id: 3, name: 'Charlie', age: 42, isActive: false },
-                    { id: 4, name: 'Denise', age: 30, isActive: true },
-                ],
-                meta: { lastId: 4 },
-            },
-            posts: { records: [], meta: { lastId: 0 } },
-            profiles: { records: [], meta: { lastId: 0 } },
-            tags: { records: [], meta: { lastId: 0 } },
-            posts_tags: { records: [], meta: { lastId: 0 } },
-        };
-    });
-
-    it('should select all fields from a table when .select() is omitted', () => {
-        const results = _queryImpl(testState, testSchema, { tableName: 'users' });
-        expect(results.length).toBe(4);
-        expect(results[0]!).toEqual({ id: 1, name: 'Alice', age: 30, isActive: true });
-        expect(Object.keys(results[0]!).length).toBe(4);
-    });
-
-    it('should select only the specified fields when using .select()', () => {
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'users',
-            select: {
-                name: testSchema.tables.users.name,
-                age: testSchema.tables.users.age
-            }
-        });
-        expect(results.length).toBe(4);
-        expect(results[0]!).toEqual({ name: 'Alice', age: 30 });
-        expect(Object.keys(results[0]!).length).toBe(2);
-    });
-
-    it('should filter records correctly using a where function', () => {
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', where: (r) => r.age === 30 });
-        expect(results.length).toBe(2);
-        expect(results[0]!.name).toBe('Alice');
-        expect(results[1]!.name).toBe('Denise');
-    });
-
-    it('should limit the number of returned records correctly using .limit()', () => {
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', limit: 2 });
-        expect(results.length).toBe(2);
-        expect(results[0]!.id).toBe(1);
-        expect(results[1]!.id).toBe(2);
-    });
-
-    it('should skip the correct number of records using .offset()', () => {
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', offset: 2 });
-        expect(results.length).toBe(2);
-        expect(results[0]!.id).toBe(3);
-        expect(results[1]!.id).toBe(4);
-    });
-
-    it('should correctly handle limit and offset together for pagination', () => {
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', offset: 1, limit: 2 });
-        expect(results.length).toBe(2);
-        expect(results[0]!.id).toBe(2);
-        expect(results[1]!.id).toBe(3);
-    });
-
-    it('should return an array of all matching records when using .all()', () => {
-        // This is implicit in _queryImpl, the test just verifies the base case
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', where: r => r.isActive === true });
-        expect(results).toBeInstanceOf(Array);
-        expect(results.length).toBe(3);
-    });
-
-    it('should return the first matching record when using .first()', () => {
-        // This is simulated by adding limit: 1
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', where: r => typeof r.age === 'number' && r.age > 28, limit: 1 });
-        expect(results.length).toBe(1);
-        expect(results[0]!.id).toBe(1);
-    });
-
-    it('should return null when .first() finds no matching record', () => {
-        // This is simulated by _queryImpl returning [] and the caller handling it
-        const results = _queryImpl(testState, testSchema, { tableName: 'users', where: r => typeof r.age === 'number' && r.age > 50, limit: 1 });
-        expect(results.length).toBe(0);
-    });
-});
-```
-
-## File: test/unit/Core/Update.test.ts
-```typescript
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { testSchema } from '../../util';
-import { _updateImpl } from '../../../src/operations';
-import { DatabaseState } from '../../../src/types';
-
-describe('Unit > Core > Update', () => {
-    let testState: DatabaseState;
-
-    beforeEach(() => {
-        testState = {
-            users: {
-                records: [
-                    { id: 1, name: 'Alice', email: 'a@a.com', age: 30, isActive: true },
-                    { id: 2, name: 'Bob', email: 'b@b.com', age: 25, isActive: true },
-                    { id: 3, name: 'Charlie', email: 'c@c.com', age: 42, isActive: false },
-                ],
-                meta: { lastId: 3 },
-            },
-            posts: { records: [], meta: { lastId: 0 } },
-            profiles: { records: [], meta: { lastId: 0 } },
-            tags: { records: [], meta: { lastId: 0 } },
-            posts_tags: { records: [], meta: { lastId: 0 } },
-        };
-    });
-
-    it('should return a new state object, not mutate the original state, on update', () => {
-        const originalState = structuredClone(testState);
-        const [newState] = _updateImpl(testState, testSchema, 'users', { age: 31 }, (r) => r.id === 1);
-        
-        expect(newState).not.toBe(originalState);
-        expect(originalState.users!.records[0]!.age).toBe(30);
-        expect(newState.users!.records.find(u => u.id === 1)?.age).toBe(31);
-    });
-
-    it('should only update records that match the predicate function', () => {
-        const [newState, updated] = _updateImpl(testState, testSchema, 'users', { isActive: true }, (r) => r.name === 'Charlie');
-        
-        expect(updated.length).toBe(1);
-        expect(updated[0]!.id).toBe(3);
-        expect(updated[0]!.isActive).toBe(true);
-        expect(newState.users!.records.find(u => u.id === 3)?.isActive).toBe(true);
-        expect(newState.users!.records.find(u => u.id === 1)?.isActive).toBe(true); // Unchanged
-    });
-
-    it('should correctly modify the fields specified in the set payload', () => {
-        const [newState, updated] = _updateImpl(testState, testSchema, 'users', { age: 26, name: 'Robert' }, (r) => r.id === 2);
-
-        expect(updated.length).toBe(1);
-        const updatedUser = newState.users!.records.find(u => u.id === 2);
-        expect(updatedUser?.name).toBe('Robert');
-        expect(updatedUser?.age).toBe(26);
-    });
-
-    it('should not allow changing the id of an updated record', () => {
-        const payload = { id: 99, age: 50 };
-        const [newState, updated] = _updateImpl(testState, testSchema, 'users', payload, (r) => r.id === 1);
-        
-        expect(updated.length).toBe(1);
-        expect(updated[0]!.id).toBe(1); // The id should remain 1
-        expect(updated[0]!.age).toBe(50);
-        
-        const userInNewState = newState.users!.records.find(u => u.age === 50);
-        expect(userInNewState?.id).toBe(1);
-
-        const userWithOldId = newState.users!.records.find(u => u.id === 1);
-        expect(userWithOldId).toBeDefined();
-        expect(userWithOldId?.age).toBe(50);
-        
-        const userWithNewId = newState.users!.records.find(u => u.id === 99);
-        expect(userWithNewId).toBeUndefined();
-    });
-
-    it('should return an empty array of updated records if the predicate matches nothing', () => {
-        const [newState, updated] = _updateImpl(testState, testSchema, 'users', { age: 99 }, (r) => r.id === 999);
-        expect(updated.length).toBe(0);
-        expect(newState.users!.records).toEqual(testState.users!.records);
-        // For a no-op, the original state object should be returned for performance.
-        expect(newState).toBe(testState);
-    });
-
-    it('should return both the new state and an array of the full, updated records in the result tuple', () => {
-        const [newState, updated] = _updateImpl(testState, testSchema, 'users', { isActive: false }, (r) => r.id === 1);
-        expect(newState).toBeDefined();
-        expect(updated).toBeInstanceOf(Array);
-        expect(updated.length).toBe(1);
-        expect(updated[0]!).toEqual({
-            id: 1,
-            name: 'Alice',
-            email: 'a@a.com',
-            age: 30,
-            isActive: false,
-        });
-    });
-});
-```
 
 ## File: src/index.ts
 ```typescript
@@ -972,378 +93,6 @@ export type DatabaseState<S extends KonroSchema<any, any> | unknown = unknown> =
     };
 ```
 
-## File: test/unit/Core/Query-With.test.ts
-```typescript
-import { describe, it, expect, beforeEach } from 'bun:test';
-import { testSchema } from '../../util';
-import { _queryImpl } from '../../../src/operations';
-import { DatabaseState } from '../../../src/types';
-
-describe('Unit > Core > Query-With', () => {
-    let testState: DatabaseState;
-
-    beforeEach(() => {
-        testState = {
-            users: {
-                records: [
-                    { id: 1, name: 'Alice' },
-                    { id: 2, name: 'Bob' },
-                ],
-                meta: { lastId: 2 },
-            },
-            posts: {
-                records: [
-                    { id: 10, title: 'Alice Post 1', authorId: 1 },
-                    { id: 11, title: 'Bob Post 1', authorId: 2 },
-                    { id: 12, title: 'Alice Post 2', authorId: 1 },
-                ],
-                meta: { lastId: 12 },
-            },
-            profiles: {
-                records: [
-                    { id: 100, bio: 'Bio for Alice', userId: 1 },
-                ],
-                meta: { lastId: 100 },
-            },
-            tags: { records: [], meta: { lastId: 0 } },
-            posts_tags: { records: [], meta: { lastId: 0 } },
-        };
-    });
-
-    it('should resolve a `one` relationship and attach it to the parent record', () => {
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'posts',
-            where: r => r.id === 10,
-            with: { author: true }
-        });
-
-        expect(results.length).toBe(1);
-        const post = results[0]!;
-        expect(post).toBeDefined();
-        const author = post.author as {id: unknown, name: unknown};
-        expect(author).toBeDefined();
-        expect(author.id).toBe(1);
-        expect(author.name).toBe('Alice');
-    });
-
-    it('should resolve a `many` relationship and attach it as an array', () => {
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'users',
-            where: r => r.id === 1,
-            with: { posts: true }
-        });
-
-        expect(results.length).toBe(1);
-        const user = results[0]!;
-        expect(user).toBeDefined();
-        const posts = user.posts as {title: unknown}[];
-        expect(posts).toBeInstanceOf(Array);
-        expect(posts.length).toBe(2);
-        expect(posts[0]!.title).toBe('Alice Post 1');
-        expect(posts[1]!.title).toBe('Alice Post 2');
-    });
-
-    it('should filter nested records within a .with() clause', () => {
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'users',
-            where: r => r.id === 1,
-            with: {
-                posts: {
-                    where: (post) => typeof post.title === 'string' && post.title.includes('Post 2')
-                }
-            }
-        });
-
-        expect(results.length).toBe(1);
-        const user = results[0]!;
-        const posts = user.posts as {id: unknown}[];
-        expect(posts).toBeDefined();
-        expect(posts.length).toBe(1);
-        expect(posts[0]!.id).toBe(12);
-    });
-
-    it('should select nested fields within a .with() clause', () => {
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'users',
-            where: r => r.id === 1,
-            with: {
-                posts: {
-                    select: {
-                        postTitle: testSchema.tables.posts.title
-                    }
-                }
-            }
-        });
-
-        expect(results.length).toBe(1);
-        const user = results[0]!;
-        const posts = user.posts as {postTitle: unknown}[];
-        expect(posts).toBeDefined();
-        expect(posts.length).toBe(2);
-        expect(posts[0]!).toEqual({ postTitle: 'Alice Post 1' });
-    });
-
-    it('should handle multiple relations at once', () => {
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'users',
-            where: r => r.id === 1,
-            with: {
-                posts: true,
-                profile: true
-            }
-        });
-        
-        expect(results.length).toBe(1);
-        const user = results[0]!;
-        const posts = user.posts as unknown[];
-        const profile = user.profile as { bio: unknown };
-        expect(posts).toBeInstanceOf(Array);
-        expect(posts.length).toBe(2);
-        expect(profile).toBeDefined();
-        expect(profile.bio).toBe('Bio for Alice');
-    });
-
-    it('should return null for a `one` relation if no related record is found', () => {
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'users',
-            where: r => r.id === 2, // Bob has no profile
-            with: { profile: true }
-        });
-
-        expect(results.length).toBe(1);
-        const user = results[0]!;
-        expect(user.profile).toBeNull();
-    });
-
-    it('should return an empty array for a `many` relation if no related records are found', () => {
-        // Add a user with no posts
-        testState.users!.records.push({ id: 3, name: 'Charlie' });
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'users',
-            where: r => r.id === 3,
-            with: { posts: true }
-        });
-
-        expect(results.length).toBe(1);
-        const user = results[0]!;
-        expect(user.posts).toBeInstanceOf(Array);
-        expect((user.posts as unknown[]).length).toBe(0);
-    });
-
-    it('should handle nested `with` clauses for deep relations', () => {
-        const results = _queryImpl(testState, testSchema, {
-            tableName: 'posts',
-            where: r => r.id === 10, // Alice Post 1
-            with: {
-                author: { // author is a user
-                    with: {
-                        posts: { // author's other posts
-                            where: p => p.id === 12 // Filter to Alice Post 2
-                        }
-                    }
-                }
-            }
-        });
-
-        expect(results.length).toBe(1);
-        const post = results[0]!;
-        expect(post.id).toBe(10);
-
-        const author = post.author as { id: unknown, name: unknown, posts: { id: unknown }[] };
-        expect(author).toBeDefined();
-        expect(author.id).toBe(1);
-        expect(author.name).toBe('Alice');
-
-        const authorPosts = author.posts;
-        expect(authorPosts).toBeInstanceOf(Array);
-        expect(authorPosts.length).toBe(1);
-        expect(authorPosts[0]!.id).toBe(12);
-    });
-});
-```
-
-## File: test/unit/Schema/ColumnHelpers.test.ts
-```typescript
-import { describe, it, expect } from 'bun:test';
-import { konro } from '../../../src/index';
-
-describe('Unit > Schema > ColumnHelpers', () => {
-  it('should create a valid ID column definition object when calling konro.id()', () => {
-    const idCol = konro.id();
-    expect(idCol).toEqual({
-      _type: 'column',
-      dataType: 'id',
-      options: { unique: true, _pk_strategy: 'auto-increment' },
-      _tsType: 0,
-    });
-  });
-
-  it('should create a valid UUID column definition object when calling konro.uuid()', () => {
-    const uuidCol = konro.uuid();
-    expect(uuidCol).toEqual({
-      _type: 'column',
-      dataType: 'id',
-      options: { unique: true, _pk_strategy: 'uuid' },
-      _tsType: '',
-    });
-  });
-
-  it('should create a valid string column definition with no options', () => {
-    const stringCol = konro.string();
-    expect(stringCol).toEqual({
-      _type: 'column',
-      dataType: 'string',
-      options: undefined,
-      _tsType: '',
-    });
-  });
-
-  it('should create a valid string column definition with all specified options', () => {
-    const defaultFn = () => 'default';
-    const stringCol = konro.string({
-      unique: true,
-      default: defaultFn,
-      min: 5,
-      max: 100,
-      format: 'email',
-    });
-    expect(stringCol).toEqual({
-      _type: 'column',
-      dataType: 'string',
-      options: {
-        unique: true,
-        default: defaultFn,
-        min: 5,
-        max: 100,
-        format: 'email',
-      },
-      _tsType: '',
-    });
-  });
-
-  it('should create a valid number column definition with no options', () => {
-    const numberCol = konro.number();
-    expect(numberCol).toEqual({
-      _type: 'column',
-      dataType: 'number',
-      options: undefined,
-      _tsType: 0,
-    });
-  });
-
-  it('should create a valid number column definition with all specified options', () => {
-    const numberCol = konro.number({
-      unique: false,
-      default: 0,
-      min: 0,
-      max: 1000,
-      type: 'integer',
-    });
-    expect(numberCol).toEqual({
-      _type: 'column',
-      dataType: 'number',
-      options: {
-        unique: false,
-        default: 0,
-        min: 0,
-        max: 1000,
-        type: 'integer',
-      },
-      _tsType: 0,
-    });
-  });
-
-  it('should create a valid boolean column with no options', () => {
-    const boolCol = konro.boolean();
-    expect(boolCol).toEqual({
-      _type: 'column',
-      dataType: 'boolean',
-      options: undefined,
-      _tsType: false,
-    });
-  });
-
-  it('should create a valid boolean column definition with a default value', () => {
-    const boolCol = konro.boolean({ default: false });
-    expect(boolCol).toEqual({
-      _type: 'column',
-      dataType: 'boolean',
-      options: { default: false },
-      _tsType: false,
-    });
-  });
-
-  it('should create a valid date column definition with no options', () => {
-    const dateCol = konro.date();
-    expect(dateCol).toEqual({
-      _type: 'column',
-      dataType: 'date',
-      options: undefined,
-      _tsType: expect.any(Date),
-    });
-  });
-
-  it('should create a valid date column definition with a default function', () => {
-    const defaultDateFn = () => new Date();
-    const dateCol = konro.date({ default: defaultDateFn });
-    expect(dateCol).toEqual({
-      _type: 'column',
-      dataType: 'date',
-      options: { default: defaultDateFn },
-      _tsType: expect.any(Date),
-    });
-    expect(dateCol.options?.default).toBe(defaultDateFn);
-  });
-
-  it('should create a valid string column with a literal default', () => {
-    const stringCol = konro.string({ default: 'hello' });
-    expect(stringCol).toEqual({
-      _type: 'column',
-      dataType: 'string',
-      options: { default: 'hello' },
-      _tsType: '',
-    });
-  });
-
-  it('should create a valid number column with a function default', () => {
-    const defaultFn = () => 42;
-    const numberCol = konro.number({ default: defaultFn });
-    expect(numberCol).toEqual({
-      _type: 'column',
-      dataType: 'number',
-      options: {
-        default: defaultFn,
-      },
-      _tsType: 0,
-    });
-    expect(numberCol.options?.default).toBe(defaultFn);
-  });
-
-  it('should create a valid boolean column with a function default', () => {
-    const defaultFn = () => true;
-    const boolCol = konro.boolean({ default: defaultFn });
-    expect(boolCol).toEqual({
-      _type: 'column',
-      dataType: 'boolean',
-      options: {
-        default: defaultFn,
-      },
-      _tsType: false,
-    });
-    expect(boolCol.options?.default).toBe(defaultFn);
-  });
-
-  it('should create a valid object column definition', () => {
-    const objCol = konro.object<{ meta: string }>();
-    expect(objCol).toMatchObject({
-      _type: 'column',
-      dataType: 'object',
-      options: undefined,
-    });
-  });
-});
-```
-
 ## File: tsconfig.json
 ```json
 {
@@ -1377,87 +126,6 @@ describe('Unit > Schema > ColumnHelpers', () => {
   "include": ["src/**/*", "test/**/*", "tsup.config.ts"],
   "exclude": ["dist/**/*"]
 }
-```
-
-## File: src/utils/serializer.util.ts
-```typescript
-import { KonroStorageError } from './error.util';
-import type { ColumnDefinition } from '../schema';
-
-const loadOptional = <T>(name: string): T | undefined => {
-  try {
-    return require(name);
-  } catch {
-    return undefined;
-  }
-};
-
-const yaml = loadOptional<{ load: (str: string) => unknown; dump: (obj: any, options?: any) => string }>('js-yaml');
-const papaparse = loadOptional<{ parse: (str: string, config?: any) => { data: any[] }; unparse: (data: any[] | object) => string; }>('papaparse');
-const xlsx = loadOptional<{ read: (data: any, opts: any) => any; utils: { sheet_to_json: <T>(ws: any) => T[]; json_to_sheet: (json: any) => any; book_new: () => any; book_append_sheet: (wb: any, ws: any, name: string) => void; }; write: (wb: any, opts: any) => any; }>('xlsx');
-
-export type Serializer = {
-  parse: <T>(data: string, tableSchema?: Record<string, ColumnDefinition<any>>) => T;
-  stringify: (obj: any) => string;
-};
-
-/** For tabular formats (CSV/XLSX), metadata isn't stored. We derive lastId from the data itself. */
-const deriveLastIdFromRecords = (records: any[], tableSchema: Record<string, ColumnDefinition<any>>): number => {
-  const idColumn = Object.keys(tableSchema).find((key) => tableSchema[key]?.dataType === 'id' && tableSchema[key]?.options?._pk_strategy !== 'uuid');
-  if (!idColumn) return 0;
-
-  return records.reduce((maxId: number, record: any) => {
-    const id = record[idColumn];
-    return typeof id === 'number' && id > maxId ? id : maxId;
-  }, 0);
-};
-
-export const getSerializer = (format: 'json' | 'yaml' | 'csv' | 'xlsx'): Serializer => {
-  switch (format) {
-    case 'json':
-      return {
-        parse: <T>(data: string): T => JSON.parse(data),
-        stringify: (obj: any): string => JSON.stringify(obj, null, 2),
-      };
-    case 'yaml':
-      if (!yaml) throw KonroStorageError("The 'yaml' format requires 'js-yaml' to be installed. Please run 'npm install js-yaml'.");
-      return {
-        parse: <T>(data: string): T => yaml.load(data) as T,
-        stringify: (obj: any): string => yaml.dump(obj),
-      };
-    case 'csv':
-      if (!papaparse) throw KonroStorageError("The 'csv' format requires 'papaparse' to be installed. Please run 'npm install papaparse'.");
-      return {
-        parse: <T>(data: string, tableSchema?: Record<string, ColumnDefinition<any>>): T => {
-          const { data: records } = papaparse.parse(data, { header: true, dynamicTyping: true, skipEmptyLines: true });
-          const lastId = tableSchema ? deriveLastIdFromRecords(records, tableSchema) : 0;
-          return { records, meta: { lastId } } as T;
-        },
-        stringify: (obj: any): string => papaparse.unparse(obj.records || []),
-      };
-    case 'xlsx':
-      if (!xlsx) throw KonroStorageError("The 'xlsx' format requires 'xlsx' to be installed. Please run 'npm install xlsx'.");
-      return {
-        parse: <T>(data: string, tableSchema?: Record<string, ColumnDefinition<any>>): T => {
-          const workbook = xlsx.read(data, { type: 'base64' });
-          const sheetName = workbook.SheetNames[0];
-          if (!sheetName) return { records: [], meta: { lastId: 0 } } as T;
-          const worksheet = workbook.Sheets[sheetName];
-          const records = xlsx.utils.sheet_to_json(worksheet);
-          const lastId = tableSchema ? deriveLastIdFromRecords(records, tableSchema) : 0;
-          return { records, meta: { lastId } } as T;
-        },
-        stringify: (obj: any): string => {
-          const worksheet = xlsx.utils.json_to_sheet(obj.records || []);
-          const workbook = xlsx.utils.book_new();
-          xlsx.utils.book_append_sheet(workbook, worksheet, 'data');
-          return xlsx.write(workbook, { bookType: 'xlsx', type: 'base64' });
-        },
-      };
-    default:
-      throw KonroStorageError(`Unsupported or invalid format specified.`);
-  }
-};
 ```
 
 ## File: package.json
@@ -1597,6 +265,66 @@ export function createFileAdapter(options: FileAdapterOptions): FileStorageAdapt
     throw KonroError("The 'on-demand' mode requires the 'multi-file' or 'per-record' storage strategy.");
   }
 
+  const strategy = createStrategy(options, { fs, serializer, fileExtension, mode });
+
+  return {
+    options,
+    fs,
+    serializer,
+    fileExtension,
+    mode,
+    ...strategy,
+  } as FileStorageAdapter;
+}
+
+type FileStrategy = Pick<StorageAdapter, 'read' | 'write'>;
+type StrategyContext = {
+  fs: FsProvider;
+  serializer: Serializer;
+  fileExtension: string;
+  mode: 'in-memory' | 'on-demand';
+};
+
+/** Chooses and creates the appropriate file strategy based on adapter options. */
+function createStrategy(options: FileAdapterOptions, context: StrategyContext): FileStrategy {
+  if (options.single) {
+    return createSingleFileStrategy(options.single, context);
+  }
+  if (options.multi) {
+    return createMultiFileStrategy(options.multi, context);
+  }
+  if (options.perRecord) {
+    return createPerRecordStrategy(options.perRecord, context);
+  }
+  // This case should be prevented by the types, but as a safeguard:
+  throw new KonroError('Invalid file adapter options: missing storage strategy.');
+}
+
+/** Creates the strategy for reading/writing the entire database to a single file. */
+function createSingleFileStrategy(options: SingleFileStrategy['single'], context: StrategyContext): FileStrategy {
+  const { fs, serializer } = context;
+
+  const parseFile = async <T>(filepath: string, schema?: Record<string, ColumnDefinition<any>>): Promise<T | undefined> => {
+    const data = await fs.readFile(filepath);
+    if (!data) return undefined;
+    try {
+      return serializer.parse<T>(data, schema);
+    } catch (e: any) {
+      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${context.fileExtension.slice(1)} file. Original error: ${e.message}`);
+    }
+  };
+
+  return {
+    read: async <S extends KonroSchema<any, any>>(schema: S) => {
+      const state = await parseFile<DatabaseState<any>>(options.filepath);
+      return (state ?? createEmptyState(schema)) as DatabaseState<S>;
+    },
+    write: (state: DatabaseState<any>) => writeAtomic(options.filepath, serializer.stringify(state), fs),
+  };
+}
+
+/** Creates the strategy for reading/writing each table to its own file in a directory. */
+function createMultiFileStrategy(options: MultiFileStrategy['multi'], context: StrategyContext): FileStrategy {
   const parseFile = async <T>(filepath: string, schema?: Record<string, ColumnDefinition<any>>): Promise<T | undefined> => {
     const data = await fs.readFile(filepath);
     if (!data) return undefined;
@@ -1607,122 +335,93 @@ export function createFileAdapter(options: FileAdapterOptions): FileStorageAdapt
     }
   };
 
-  const readSingle = async <S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>> => {
-    const state = await parseFile<DatabaseState<any>>(options.single!.filepath);
-    // The cast is acceptable as the original code made the same implicit assumption.
-    return (state ?? createEmptyState(schema)) as DatabaseState<S>;
+  return {
+    read: async <S extends KonroSchema<any, any>>(schema: S) => {
+      await context.fs.mkdir(options.dir, { recursive: true });
+      const state = createEmptyState(schema);
+      await Promise.all(
+        Object.keys(schema.tables).map(async (tableName) => {
+          const filepath = path.join(options.dir, `${tableName}${context.fileExtension}`);
+          const tableState = await parseFile<TableState<any>>(filepath, schema.tables[tableName]);
+          if (tableState) (state as any)[tableName] = tableState;
+        })
+      );
+      return state;
+    },
+    write: async (state: DatabaseState<any>) => {
+      await context.fs.mkdir(options.dir, { recursive: true });
+      const writes = Object.entries(state).map(([tableName, tableState]) => {
+        const filepath = path.join(options.dir, `${tableName}${context.fileExtension}`);
+        return writeAtomic(filepath, context.serializer.stringify(tableState), context.fs);
+      });
+      await Promise.all(writes);
+    },
   };
+}
 
-  const readMulti = async <S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>> => {
-    const dir = options.multi!.dir;
-    await fs.mkdir(dir, { recursive: true });
-    const state = createEmptyState(schema);
-    await Promise.all(
-      Object.keys(schema.tables).map(async (tableName) => {
-        const filepath = path.join(dir, `${tableName}${fileExtension}`);
-        const tableState = await parseFile<TableState<any>>(filepath, schema.tables[tableName]);
-        if (tableState) (state as any)[tableName] = tableState;
-      })
-    );
-    return state;
-  };
+/** Creates the strategy for reading/writing each record to its own file. */
+function createPerRecordStrategy(options: PerRecordStrategy['perRecord'], context: StrategyContext): FileStrategy {
+  const { fs, serializer, fileExtension } = context;
 
-  const readPerRecord = async <S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>> => {
-    const dir = options.perRecord!.dir;
-    await fs.mkdir(dir, { recursive: true });
-    const state = createEmptyState(schema);
-
-    await Promise.all(
-      Object.keys(schema.tables).map(async (tableName) => {
-        const tableDir = path.join(dir, tableName);
-        await fs.mkdir(tableDir, { recursive: true });
-
-        // Read meta file for lastId
-        const metaPath = path.join(tableDir, '_meta.json');
-        try {
-          const metaContent = await fs.readFile(metaPath);
-          if (metaContent) {
-            (state as any)[tableName].meta = JSON.parse(metaContent);
-          }
-        } catch (e) {
-          /* ignore if not found or parsing fails, will use default */
-        }
-
-        const files = await fs.readdir(tableDir);
-        const recordFiles = files.filter((f) => !f.startsWith('_meta'));
-
-        const records = await Promise.all(
-          recordFiles.map((file) => parseFile<KRecord>(path.join(tableDir, file)))
-        );
-
-        (state as any)[tableName].records = records.filter((r): r is KRecord => r != null);
-
-        // If meta file didn't exist or was empty, derive lastId for auto-increment PKs.
-        if ((state as any)[tableName].meta.lastId === 0) {
-          const tableSchema = schema.tables[tableName];
-          const idColumn = Object.keys(tableSchema).find((key) => tableSchema[key]?.dataType === 'id' && tableSchema[key]?.options?._pk_strategy !== 'uuid');
-          if (idColumn) {
-            (state as any)[tableName].meta.lastId = (state as any)[tableName].records.reduce((maxId: number, record: KRecord) => {
-              const id = record[idColumn];
-              return typeof id === 'number' && id > maxId ? id : maxId;
-            }, 0);
-          }
-        }
-      })
-    );
-    return state;
-  };
-
-  const writeSingle = (state: DatabaseState<any>) => writeAtomic(options.single!.filepath, serializer.stringify(state), fs);
-
-  const writeMulti = async (state: DatabaseState<any>) => {
-    const dir = options.multi!.dir;
-    await fs.mkdir(dir, { recursive: true });
-    const writes = Object.entries(state).map(([tableName, tableState]) => {
-      const filepath = path.join(dir, `${tableName}${fileExtension}`);
-      return writeAtomic(filepath, serializer.stringify(tableState), fs);
-    });
-    await Promise.all(writes);
-  };
-
-  const writePerRecord = async (state: DatabaseState<any>, schema: KonroSchema<any, any>) => {
-    const dir = options.perRecord!.dir;
-    await fs.mkdir(dir, { recursive: true });
-
-    const writes = Object.entries(state).map(async ([tableName, tableState]) => {
-      const tableDir = path.join(dir, tableName);
-      await fs.mkdir(tableDir, { recursive: true });
-
-      // Write meta file first
-      const metaPath = path.join(tableDir, '_meta.json');
-      await writeAtomic(metaPath, JSON.stringify(tableState.meta, null, 2), fs);
-
-      const idColumn = Object.keys(schema.tables[tableName]).find((key) => schema.tables[tableName][key]?.dataType === 'id');
-      if (!idColumn) {
-        throw KonroError(`Table "${tableName}" must have an 'id' column to be used with 'per-record' storage.`);
-      }
-
-      const currentFiles = new Set(tableState.records.map((r: KRecord) => `${r[idColumn]}${fileExtension}`));
-      const existingFiles = (await fs.readdir(tableDir)).filter((f) => !f.startsWith('_meta') && !f.endsWith(TEMP_FILE_SUFFIX));
-
-      const recordWrites = tableState.records.map((record: KRecord) => writeAtomic(path.join(tableDir, `${record[idColumn]}${fileExtension}`), serializer.stringify(record), fs));
-      const recordsToDelete = existingFiles.filter((f) => !currentFiles.has(f));
-      const recordDeletes = recordsToDelete.map((f) => fs.unlink(path.join(tableDir, f)));
-
-      await Promise.all([...recordWrites, ...recordDeletes]);
-    });
-    await Promise.all(writes);
+  const parseFile = async <T>(filepath: string): Promise<T | undefined> => {
+    const data = await fs.readFile(filepath);
+    if (!data) return undefined;
+    try {
+      return serializer.parse<T>(data);
+    } catch (e: any) {
+      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${context.fileExtension.slice(1)} file. Original error: ${e.message}`);
+    }
   };
 
   return {
-    options,
-    fs,
-    serializer,
-    fileExtension,
-    mode,
-    read: options.single ? readSingle : options.multi ? readMulti : readPerRecord,
-    write: options.single ? writeSingle : options.multi ? writeMulti : writePerRecord,
-  } as FileStorageAdapter;
+    read: async <S extends KonroSchema<any, any>>(schema: S) => {
+      await fs.mkdir(options.dir, { recursive: true });
+      const state = createEmptyState(schema);
+      await Promise.all(
+        Object.keys(schema.tables).map(async (tableName) => {
+          const tableDir = path.join(options.dir, tableName);
+          await fs.mkdir(tableDir, { recursive: true });
+
+          const metaContent = await fs.readFile(path.join(tableDir, '_meta.json')).catch(() => null);
+          if (metaContent) (state as any)[tableName].meta = JSON.parse(metaContent);
+
+          const files = await fs.readdir(tableDir);
+          const recordFiles = files.filter((f) => !f.startsWith('_meta'));
+          const records = (await Promise.all(recordFiles.map((file) => parseFile<KRecord>(path.join(tableDir, file))))).filter((r): r is KRecord => r != null);
+          (state as any)[tableName].records = records;
+
+          if ((state as any)[tableName].meta.lastId === 0) {
+            const idColumn = Object.keys(schema.tables[tableName]).find((k) => schema.tables[tableName][k]?.options?._pk_strategy === 'auto-increment');
+            if (idColumn) {
+              (state as any)[tableName].meta.lastId = records.reduce((maxId: number, record: KRecord) => {
+                const id = record[idColumn];
+                return typeof id === 'number' && id > maxId ? id : maxId;
+              }, 0);
+            }
+          }
+        })
+      );
+      return state;
+    },
+    write: async (state: DatabaseState<any>, schema: KonroSchema<any, any>) => {
+      await fs.mkdir(options.dir, { recursive: true });
+      await Promise.all(Object.entries(state).map(async ([tableName, tableState]) => {
+        const tableDir = path.join(options.dir, tableName);
+        await fs.mkdir(tableDir, { recursive: true });
+        await writeAtomic(path.join(tableDir, '_meta.json'), JSON.stringify(tableState.meta, null, 2), fs);
+
+        const idColumn = Object.keys(schema.tables[tableName]).find((k) => schema.tables[tableName][k]?.dataType === 'id');
+        if (!idColumn) throw KonroError(`Table "${tableName}" must have an 'id' column for 'per-record' storage.`);
+
+        const currentFiles = new Set(tableState.records.map((r: KRecord) => `${r[idColumn]}${fileExtension}`));
+        const existingFiles = (await fs.readdir(tableDir)).filter(f => !f.startsWith('_meta') && !f.endsWith(TEMP_FILE_SUFFIX));
+
+        const recordWrites = tableState.records.map((r: KRecord) => writeAtomic(path.join(tableDir, `${r[idColumn]}${fileExtension}`), serializer.stringify(r), fs));
+        const recordDeletes = existingFiles.filter(f => !currentFiles.has(f)).map(f => fs.unlink(path.join(tableDir, f)));
+        await Promise.all([...recordWrites, ...recordDeletes]);
+      }));
+    }
+  };
 }
 ```
 
@@ -2134,23 +833,17 @@ export const _deleteImpl = (state: DatabaseState, schema: KonroSchema<any, any>,
 
   // Soft delete path
   if (deletedAtColumn) {
-    const recordsToUpdate: KRecord[] = [];
-    const now = new Date();
-
-    const newRecords = oldTableState.records.map(record => {
-      if (!record[deletedAtColumn] && predicate(record)) { // Not already soft-deleted and matches predicate
-        const updatedRecord = { ...record, [deletedAtColumn]: now };
-        recordsToUpdate.push(updatedRecord);
-        return updatedRecord;
-      }
-      return record;
-    });
+    // Use update implementation for soft-delete. It will also handle `updatedAt`.
+    const [baseState, recordsToUpdate] = _updateImpl(
+      state,
+      schema,
+      tableName,
+      { [deletedAtColumn]: new Date() },
+      (record) => !record[deletedAtColumn] && predicate(record)
+    );
 
     if (recordsToUpdate.length === 0) return [state, []];
-
-    const baseState = { ...state, [tableName]: { ...oldTableState, records: newRecords } };
     const finalState = applyCascades(baseState, schema, tableName, recordsToUpdate);
-    
     // The returned records are the ones that were just soft-deleted from this table.
     return [finalState, recordsToUpdate];
   } 
@@ -2439,192 +1132,26 @@ function createCoreDbContext<S extends KonroSchema<any, any>>(schema: S) {
 
 // --- ON-DEMAND CONTEXT (STATEFUL WRAPPER) ---
 
-function createMultiFileOnDemandDbContext<S extends KonroSchema<any, any>>(
-  schema: S,
-  adapter: FileStorageAdapter,
-  core: ReturnType<typeof createCoreDbContext<S>>
-): OnDemandDbContext<S> {
-  const { dir } = adapter.options.multi!;
+type CoreDbContext<S extends KonroSchema<any, any>> = ReturnType<typeof createCoreDbContext<S>>;
 
-  const readTableState = async (tableName: string): Promise<TableState> => {
-    const filepath = path.join(dir, `${tableName}${adapter.fileExtension}`);
-    const data = await adapter.fs.readFile(filepath);
-    if (!data) return { records: [], meta: { lastId: 0 } };
-    try {
-      return adapter.serializer.parse(data, schema.tables[tableName]);
-    } catch (e: any) {
-      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${adapter.options.format} file. Original error: ${e.message}`);
-    }
-  };
-
-  const writeTableState = async (tableName: string, tableState: TableState): Promise<void> => {
-    await adapter.fs.mkdir(dir, { recursive: true });
-    const filepath = path.join(dir, `${tableName}${adapter.fileExtension}`);
-    const content = adapter.serializer.stringify(tableState);
-    await writeAtomic(filepath, content, adapter.fs);
-  };
-  
-  // For queries with relations, we need the full state.
-  const getFullState = async (): Promise<DatabaseState<S>> => {
-    const state = createEmptyStateImpl(schema);
-    await Promise.all(Object.keys(schema.tables).map(async (tableName) => {
-      (state as any)[tableName] = await readTableState(tableName);
-    }));
-    return state;
-  }
-
-  // A generic handler for CUD operations that reads one table, performs an action, and writes it back.
-  const performCud = async <TResult>(tableName: string, action: (state: DatabaseState<S>) => [DatabaseState<S>, TResult]): Promise<TResult> => {
-    const state = createEmptyStateImpl(schema);
-    (state as any)[tableName] = await readTableState(tableName);
-    const [newState, result] = action(state as DatabaseState<S>);
-    
-    // Check if the operation produced a result (e.g., an array of inserted/updated/deleted records)
-    const hasChanges = Array.isArray(result) ? result.length > 0 : result !== null;
-    if (hasChanges) {
-      const newTableState = newState[tableName as string];
-      // This check satisfies the `noUncheckedIndexedAccess` compiler option.
-      // Our CUD logic ensures this state will always exist after a change.
-      if (newTableState) {
-        await writeTableState(tableName, newTableState);
-      }
-    }
-    return result;
-  };
-
-  const query = (): OnDemandQueryBuilder<S> => ({
-    from: <TName extends keyof S['tables']>(tableName: TName): OnDemandChainedQueryBuilder<S, TName, S['base'][TName]> => {
-      // The query builder for on-demand must be separate because its terminal methods are async.
-      const createBuilder = <TReturn>(currentDescriptor: QueryDescriptor): OnDemandChainedQueryBuilder<S, TName, TReturn> => ({
-        select(fields) { return createBuilder<TReturn>({ ...currentDescriptor, select: fields }); },
-        where(predicate) { return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate as any) }); },
-        withDeleted() { return createBuilder<TReturn>({ ...currentDescriptor, withDeleted: true }); },
-        with<W extends WithArgument<S['types'][TName]>>(relations: W) {
-          const newWith = { ...currentDescriptor.with, ...(relations as QueryDescriptor['with']) };
-          return createBuilder<TReturn & ResolveWith<S, TName, W>>({ ...currentDescriptor, with: newWith });
-        },
-        limit(count) { return createBuilder<TReturn>({ ...currentDescriptor, limit: count }); },
-        offset(count) { return createBuilder<TReturn>({ ...currentDescriptor, offset: count }); },
-        all: async (): Promise<TReturn[]> => {
-          const state = await getFullState();
-          return _queryImpl(state, schema, currentDescriptor) as any;
-        },
-        first: async (): Promise<TReturn | null> => {
-          const state = await getFullState();
-          return (_queryImpl(state, schema, { ...currentDescriptor, limit: 1 })[0] ?? null) as any;
-        },
-        aggregate: async (aggregations) => {
-          const state = await getFullState();
-          const aggDescriptor: AggregationDescriptor = { ...currentDescriptor, aggregations };
-          return _aggregateImpl(state, schema, aggDescriptor) as any;
-        },
-      });
-      return createBuilder<S['base'][TName]>({ tableName: tableName as string });
-    },
-  });
-
-  const insert = <T extends keyof S['tables']>(tableName: T, values: S['create'][T] | Readonly<S['create'][T]>[]): Promise<any> => 
-    performCud(tableName as string, (state) => core.insert(state, tableName, values as any));
-
-  const update = <T extends keyof S['tables']>(tableName: T): OnDemandUpdateBuilder<S['base'][T], S['create'][T]> => ({
-    set: (data) => ({
-      where: (predicate) => performCud(tableName as string, (state) => core.update(state, tableName).set(data).where(predicate as any)) as Promise<S['base'][T][]>,
-    }),
-  });
-
-  const del = <T extends keyof S['tables']>(tableName: T): OnDemandDeleteBuilder<S['base'][T]> => ({
-    where: async (predicate) => {
-      // Cascading deletes require the full state.
-      const state = await getFullState();
-      const [newState, deletedRecords] = core.delete(state, tableName).where(predicate as any);
-
-      // Find changed tables and write them back
-      const changedTableNames = Object.keys(newState).filter(key => newState[key as keyof typeof newState] !== state[key as keyof typeof state]);
-      
-      await Promise.all(
-        changedTableNames.map(name => writeTableState(name, newState[name as keyof typeof newState]!))
-      );
-
-      return deletedRecords as S['base'][T][];
-    },
-  });
-
-  const notSupported = () => Promise.reject(KonroError("This method is not supported in 'on-demand' mode."));
-
-  return {
-    schema,
-    adapter,
-    read: notSupported,
-    write: notSupported,
-    createEmptyState: () => createEmptyStateImpl(schema),
-    query,
-    insert,
-    update,
-    delete: del,
-  };
+/** Defines the contract for file I/O operations in on-demand mode. */
+interface OnDemandIO<S extends KonroSchema<any, any>> {
+  getFullState(): Promise<DatabaseState<S>>;
+  insert(core: CoreDbContext<S>, tableName: string, values: any): Promise<any>;
+  update(core: CoreDbContext<S>, tableName: string, data: Partial<KRecord>, predicate: (record: KRecord) => boolean): Promise<KRecord[]>;
+  delete(core: CoreDbContext<S>, tableName: string, predicate: (record: KRecord) => boolean): Promise<KRecord[]>;
 }
 
-function createPerRecordOnDemandDbContext<S extends KonroSchema<any, any>>(
+/**
+ * Creates a generic, unified `OnDemandDbContext` from an I/O strategy.
+ * This function is the key to removing duplication between 'multi-file' and 'per-record' modes.
+ */
+function createOnDemandDbContext<S extends KonroSchema<any, any>>(
   schema: S,
-  adapter: FileStorageAdapter,
-  core: ReturnType<typeof createCoreDbContext<S>>
+  adapter: StorageAdapter,
+  core: CoreDbContext<S>,
+  io: OnDemandIO<S>
 ): OnDemandDbContext<S> {
-  const { dir } = adapter.options.perRecord!;
-  const { fs, serializer, fileExtension } = adapter;
-
-  const getTableDir = (tableName: string) => path.join(dir, tableName);
-  const getRecordPath = (tableName: string, recordId: string | number) => path.join(getTableDir(tableName), `${recordId}${fileExtension}`);
-  const getMetaPath = (tableName: string) => path.join(getTableDir(tableName), '_meta.json');
-
-  const getIdColumn = (tableName: string) => {
-    const tableSchema = schema.tables[tableName];
-    const idColumn = Object.keys(tableSchema).find((key) => tableSchema[key]?.dataType === 'id');
-    if (!idColumn) {
-      throw KonroError(`Table "${tableName}" must have an 'id' column to be used with 'per-record' storage.`);
-    }
-    return idColumn;
-  };
-
-  const readMeta = async (tableName: string): Promise<{ lastId: number }> => {
-    const metaContent = await fs.readFile(getMetaPath(tableName));
-    return metaContent ? JSON.parse(metaContent) : { lastId: 0 };
-  };
-
-  const writeMeta = async (tableName: string, meta: { lastId: number }): Promise<void> => {
-    await fs.mkdir(getTableDir(tableName), { recursive: true });
-    await writeAtomic(getMetaPath(tableName), JSON.stringify(meta, null, 2), fs);
-  };
-
-  const readTableState = async (tableName: string): Promise<TableState> => {
-    const tableDir = getTableDir(tableName);
-    await fs.mkdir(tableDir, { recursive: true });
-
-    const meta = await readMeta(tableName);
-    const files = await fs.readdir(tableDir);
-    const recordFiles = files.filter((f) => !f.startsWith('_meta'));
-
-    const records = (
-      await Promise.all(
-        recordFiles.map(async (file) => {
-          const content = await fs.readFile(path.join(tableDir, file));
-          return content ? serializer.parse<KRecord>(content) : null;
-        })
-      )
-    ).filter((r): r is KRecord => r !== null);
-
-    return { records, meta };
-  };
-
-  const getFullState = async (): Promise<DatabaseState<S>> => {
-    const state = createEmptyStateImpl(schema);
-    await Promise.all(
-      Object.keys(schema.tables).map(async (tableName) => {
-        (state as any)[tableName] = await readTableState(tableName);
-      })
-    );
-    return state;
-  };
-
   const query = (): OnDemandQueryBuilder<S> => ({
     from: <TName extends keyof S['tables']>(tableName: TName): OnDemandChainedQueryBuilder<S, TName, S['base'][TName]> => {
       const createBuilder = <TReturn>(currentDescriptor: QueryDescriptor): OnDemandChainedQueryBuilder<S, TName, TReturn> => ({
@@ -2637,16 +1164,16 @@ function createPerRecordOnDemandDbContext<S extends KonroSchema<any, any>>(
         },
         limit(count) { return createBuilder<TReturn>({ ...currentDescriptor, limit: count }); },
         offset(count) { return createBuilder<TReturn>({ ...currentDescriptor, offset: count }); },
-        all: async (): Promise<TReturn[]> => {
-          const state = await getFullState();
+        all: async () => {
+          const state = await io.getFullState();
           return _queryImpl(state, schema, currentDescriptor) as any;
         },
-        first: async (): Promise<TReturn | null> => {
-          const state = await getFullState();
+        first: async () => {
+          const state = await io.getFullState();
           return (_queryImpl(state, schema, { ...currentDescriptor, limit: 1 })[0] ?? null) as any;
         },
         aggregate: async (aggregations) => {
-          const state = await getFullState();
+          const state = await io.getFullState();
           const aggDescriptor: AggregationDescriptor = { ...currentDescriptor, aggregations };
           return _aggregateImpl(state, schema, aggDescriptor) as any;
         },
@@ -2655,97 +1182,17 @@ function createPerRecordOnDemandDbContext<S extends KonroSchema<any, any>>(
     },
   });
 
-  const insert = async <T extends keyof S['tables']>(tableName: T, values: S['create'][T] | Readonly<S['create'][T]>[]): Promise<any> => {
-    const tableNameStr = tableName as string;
-    const meta = await readMeta(tableNameStr);
-    const idColumn = getIdColumn(tableNameStr);
-
-    // We only need a shallow table state for insert, no records needed for validation context.
-    const tempState: DatabaseState = { [tableNameStr]: { records: [], meta } };
-    const [newState, insertedResult] = core.insert(tempState as any, tableName, values as any);
-
-    const insertedAsArray = Array.isArray(insertedResult) ? insertedResult : insertedResult ? [insertedResult] : [];
-
-    if (insertedAsArray.length === 0) {
-      return insertedResult; // Return original empty array or null
-    }
-
-    await Promise.all(
-      (insertedAsArray as KRecord[]).map((rec) => {
-        const recordPath = getRecordPath(tableNameStr, rec[idColumn] as any);
-        return writeAtomic(recordPath, serializer.stringify(rec), fs);
-      })
-    );
-
-    const newMeta = (newState as DatabaseState)[tableNameStr]?.meta;
-    if (newMeta && newMeta.lastId !== meta.lastId) {
-      await writeMeta(tableNameStr, newMeta);
-    }
-
-    return insertedResult;
-  };
+  const insert = <T extends keyof S['tables']>(tableName: T, values: S['create'][T] | Readonly<S['create'][T]>[]): Promise<any> =>
+    io.insert(core, tableName as string, values);
 
   const update = <T extends keyof S['tables']>(tableName: T): OnDemandUpdateBuilder<S['base'][T], S['create'][T]> => ({
     set: (data) => ({
-      where: async (predicate) => {
-        const tableNameStr = tableName as string;
-        const tableState = await readTableState(tableNameStr);
-        const idColumn = getIdColumn(tableNameStr);
-        const [, updatedRecords] = core.update({ [tableNameStr]: tableState } as any, tableName).set(data).where(predicate as any);
-
-        if (updatedRecords.length > 0) {
-          await Promise.all(
-            (updatedRecords as KRecord[]).map((rec) => writeAtomic(getRecordPath(tableNameStr, rec[idColumn] as any), serializer.stringify(rec), fs))
-          );
-        }
-        return updatedRecords as S['base'][T][];
-      },
+      where: (predicate) => io.update(core, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate as any)),
     }),
   });
 
   const del = <T extends keyof S['tables']>(tableName: T): OnDemandDeleteBuilder<S['base'][T]> => ({
-    where: async (predicate) => {
-      const state = await getFullState();
-      const [newState, deletedRecords] = core.delete(state, tableName).where(predicate as any);
-
-      const changePromises: Promise<any>[] = [];
-
-      for (const tName of Object.keys(schema.tables)) {
-        const oldTableState = state[tName as keyof typeof state]!;
-        const newTableState = newState[tName as keyof typeof newState]!;
-
-        if (oldTableState === newTableState) continue;
-
-        const tableDir = getTableDir(tName);
-        changePromises.push(fs.mkdir(tableDir, { recursive: true }));
-
-        if (JSON.stringify(oldTableState.meta) !== JSON.stringify(newTableState.meta)) {
-          changePromises.push(writeMeta(tName, newTableState.meta));
-        }
-
-        const tIdColumn = getIdColumn(tName);
-        const oldRecordsMap = new Map(oldTableState.records.map(r => [r[tIdColumn], r]));
-        const newRecordsMap = new Map(newTableState.records.map(r => [r[tIdColumn], r]));
-        
-        for (const [id, record] of newRecordsMap.entries()) {
-            const oldRecord = oldRecordsMap.get(id);
-            // Write if new or record object identity has changed
-            if (!oldRecord || oldRecord !== record) {
-                changePromises.push(writeAtomic(getRecordPath(tName, id as any), serializer.stringify(record), fs));
-            }
-        }
-        
-        for (const id of oldRecordsMap.keys()) {
-            if (!newRecordsMap.has(id)) { // Deleted record
-                changePromises.push(fs.unlink(getRecordPath(tName, id as any)));
-            }
-        }
-      }
-
-      await Promise.all(changePromises);
-
-      return deletedRecords as S['base'][T][];
-    },
+    where: (predicate) => io.delete(core, tableName as string, normalizePredicate(predicate as any)),
   });
 
   const notSupported = () => Promise.reject(KonroError("This method is not supported in 'on-demand' mode."));
@@ -2768,25 +1215,160 @@ export function createDatabase<S extends KonroSchema<any, any>>(
   const { schema, adapter } = options;
   const core = createCoreDbContext(schema);
 
-  if (adapter.mode === 'on-demand') {
-    const fileAdapter = adapter as FileStorageAdapter; // We can be sure it's a FileStorageAdapter due to checks
-    if (fileAdapter.options.multi) {
-      return createMultiFileOnDemandDbContext(schema, fileAdapter, core);
-    }
-    if (fileAdapter.options.perRecord) {
-      return createPerRecordOnDemandDbContext(schema, fileAdapter, core);
-    }
-    throw KonroError("The 'on-demand' mode requires a 'multi-file' or 'per-record' storage strategy.");
+  // --- In-Memory Mode ---
+  if (adapter.mode === 'in-memory') {
+    return {
+      ...core,
+      schema, adapter,
+      read: () => adapter.read(schema),
+      write: (state) => adapter.write(state, schema),
+      createEmptyState: () => createEmptyStateImpl(schema),
+    } as InMemoryDbContext<S>;
   }
 
-  // For in-memory, just combine the core logic with the adapter and I/O methods.
-  return {
-    ...core,
-    schema, adapter,
-    read: () => adapter.read(schema),
-    write: (state) => adapter.write(state, schema),
-    createEmptyState: () => createEmptyStateImpl(schema),
-  } as InMemoryDbContext<S>;
+  // --- On-Demand Mode ---
+  const fileAdapter = adapter as FileStorageAdapter; // We can be sure it's a FileStorageAdapter due to checks
+  const { fs, serializer, fileExtension } = fileAdapter;
+
+  // The `read` method from the adapter provides the canonical way to get the full state.
+  const getFullState = (): Promise<DatabaseState<S>> => adapter.read(schema);
+  
+  // --- I/O Strategy for Multi-File ---
+  const createMultiFileIO = (): OnDemandIO<S> => {
+    const { dir } = fileAdapter.options.multi!;
+    const getTablePath = (tableName: string) => path.join(dir, `${tableName}${fileExtension}`);
+
+    const readTableState = async (tableName: string): Promise<TableState> => {
+      const data = await fs.readFile(getTablePath(tableName));
+      if (!data) return { records: [], meta: { lastId: 0 } };
+      try {
+        return serializer.parse(data, schema.tables[tableName]);
+      } catch (e: any) {
+        throw KonroStorageError(`Failed to parse file at "${getTablePath(tableName)}". Original error: ${e.message}`);
+      }
+    };
+
+    const writeTableState = async (tableName: string, tableState: TableState): Promise<void> => {
+      await fs.mkdir(dir, { recursive: true });
+      await writeAtomic(getTablePath(tableName), serializer.stringify(tableState), fs);
+    };
+
+    return {
+      getFullState,
+      insert: async (core, tableName, values) => {
+        const state = createEmptyStateImpl(schema);
+        (state as any)[tableName] = await readTableState(tableName);
+        const [newState, result] = core.insert(state, tableName as keyof S["tables"], values as any);
+        await writeTableState(tableName, newState[tableName]!);
+        return result;
+      },
+      update: async (core, tableName, data, predicate) => {
+        const state = createEmptyStateImpl(schema);
+        (state as any)[tableName] = await readTableState(tableName);
+        const [newState, result] = core.update(state, tableName as keyof S["tables"]).set(data).where(predicate);
+        if (result.length > 0) await writeTableState(tableName, newState[tableName]!);
+        return result as any;
+      },
+      delete: async (core, tableName, predicate) => {
+        const state = await getFullState(); // Cascades require full state
+        const [newState, deletedRecords] = core.delete(state, tableName as keyof S["tables"]).where(predicate);
+        const changedTables = Object.keys(newState).filter(k => newState[k as keyof typeof newState] !== state[k as keyof typeof state]);
+        await Promise.all(changedTables.map(t => writeTableState(t, newState[t as keyof typeof newState]!)));
+        return deletedRecords as any;
+      },
+    };
+  };
+
+  // --- I/O Strategy for Per-Record ---
+  const createPerRecordIO = (): OnDemandIO<S> => {
+    const { dir } = fileAdapter.options.perRecord!;
+    const getTableDir = (tableName: string) => path.join(dir, tableName);
+    const getRecordPath = (tableName: string, id: any) => path.join(getTableDir(tableName), `${id}${fileExtension}`);
+    const getMetaPath = (tableName: string) => path.join(getTableDir(tableName), '_meta.json');
+    const getIdColumn = (tableName: string) => {
+      const col = Object.keys(schema.tables[tableName]).find(k => schema.tables[tableName][k]?.dataType === 'id');
+      if (!col) throw KonroError(`Table "${tableName}" needs an 'id' column for 'per-record' mode.`);
+      return col;
+    };
+
+    return {
+      getFullState,
+      insert: async (core, tableName, values) => {
+        const metaContent = await fs.readFile(getMetaPath(tableName)).catch(() => null);
+        const meta = metaContent ? JSON.parse(metaContent) : { lastId: 0 };
+        const idCol = getIdColumn(tableName);
+
+        // Perform insert without existing records for performance
+        const [newState, inserted] = core.insert({ [tableName]: { records: [], meta } } as any, tableName as keyof S["tables"], values as any);
+        const insertedArr = Array.isArray(inserted) ? inserted : (inserted ? [inserted] : []);
+        if (insertedArr.length === 0) return inserted;
+
+        // Write new records and update meta if it changed
+        await fs.mkdir(getTableDir(tableName), { recursive: true });
+        const newMeta = newState[tableName]?.meta;
+        const promises = insertedArr.map((r: any) => writeAtomic(getRecordPath(tableName, r[idCol]), serializer.stringify(r), fs));
+        if (newMeta && newMeta.lastId !== meta.lastId) {
+          promises.push(writeAtomic(getMetaPath(tableName), JSON.stringify(newMeta, null, 2), fs));
+        }
+        await Promise.all(promises);
+        return inserted;
+      },
+      update: async (core, tableName, data, predicate) => {
+        const state = await getFullState(); // Update needs full table state for predicate
+        const [newState, updated] = core.update(state, tableName as keyof S["tables"]).set(data).where(predicate);
+        if (updated.length === 0) return updated as any;
+
+        const idCol = getIdColumn(tableName);
+        await Promise.all(updated.map((r: any) => writeAtomic(getRecordPath(tableName, r[idCol]), serializer.stringify(r), fs)));
+        
+        const newMeta = newState[tableName]?.meta;
+        const oldMeta = state[tableName as keyof typeof state]?.meta;
+        if (newMeta && JSON.stringify(newMeta) !== JSON.stringify(oldMeta)) {
+            await writeAtomic(getMetaPath(tableName), JSON.stringify(newMeta, null, 2), fs);
+        }
+        return updated as any;
+      },
+      delete: async (core, tableName, predicate) => {
+        const oldState = await getFullState();
+        const [newState, deletedRecords] = core.delete(oldState, tableName as keyof S["tables"]).where(predicate);
+        if (deletedRecords.length === 0) return deletedRecords as any;
+
+        const changes = Object.keys(schema.tables).map(async tName => {
+          const oldTState = oldState[tName as keyof typeof oldState]!;
+          const newTState = newState[tName as keyof typeof newState]!;
+          if (oldTState === newTState) return;
+
+          const idCol = getIdColumn(tName);
+          const oldMap = new Map(oldTState.records.map((r: any) => [r[idCol], r]));
+          const newMap = new Map(newTState.records.map((r: any) => [r[idCol], r]));
+          
+          const promises: Promise<void>[] = [];
+          if (JSON.stringify(oldTState.meta) !== JSON.stringify(newTState.meta)) {
+            promises.push(fs.mkdir(getTableDir(tName), { recursive: true }).then(() => 
+              writeAtomic(getMetaPath(tName), JSON.stringify(newTState.meta, null, 2), fs))
+            );
+          }
+          newMap.forEach((rec, id) => {
+            if (oldMap.get(id) !== rec) promises.push(writeAtomic(getRecordPath(tName, id), serializer.stringify(rec), fs));
+          });
+          oldMap.forEach((_rec, id) => {
+            if (!newMap.has(id)) promises.push(fs.unlink(getRecordPath(tName, id)));
+          });
+          await Promise.all(promises);
+        });
+
+        await Promise.all(changes);
+        return deletedRecords as any;
+      },
+    };
+  };
+
+  const io = fileAdapter.options.multi ? createMultiFileIO() : fileAdapter.options.perRecord ? createPerRecordIO() : null;
+  if (!io) {
+    throw KonroError("The 'on-demand' mode requires a 'multi-file' or 'per-record' storage strategy.");
+  }
+  
+  return createOnDemandDbContext(schema, adapter, core, io);
 }
 ```
 

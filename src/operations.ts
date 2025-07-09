@@ -404,23 +404,17 @@ export const _deleteImpl = (state: DatabaseState, schema: KonroSchema<any, any>,
 
   // Soft delete path
   if (deletedAtColumn) {
-    const recordsToUpdate: KRecord[] = [];
-    const now = new Date();
-
-    const newRecords = oldTableState.records.map(record => {
-      if (!record[deletedAtColumn] && predicate(record)) { // Not already soft-deleted and matches predicate
-        const updatedRecord = { ...record, [deletedAtColumn]: now };
-        recordsToUpdate.push(updatedRecord);
-        return updatedRecord;
-      }
-      return record;
-    });
+    // Use update implementation for soft-delete. It will also handle `updatedAt`.
+    const [baseState, recordsToUpdate] = _updateImpl(
+      state,
+      schema,
+      tableName,
+      { [deletedAtColumn]: new Date() },
+      (record) => !record[deletedAtColumn] && predicate(record)
+    );
 
     if (recordsToUpdate.length === 0) return [state, []];
-
-    const baseState = { ...state, [tableName]: { ...oldTableState, records: newRecords } };
     const finalState = applyCascades(baseState, schema, tableName, recordsToUpdate);
-    
     // The returned records are the ones that were just soft-deleted from this table.
     return [finalState, recordsToUpdate];
   } 

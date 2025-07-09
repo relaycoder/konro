@@ -40,7 +40,7 @@ describe('Integration > Adapters > OnDemand', () => {
           mode: 'on-demand',
           single: { filepath: path.join(dbDirPath, 'db.json') },
         });
-      }).toThrow(KonroError("The 'on-demand' mode requires the 'multi-file' or 'per-record' storage strategy."));
+      }).toThrow(KonroError({ code: 'E104' }));
     });
   });
 
@@ -56,11 +56,11 @@ describe('Integration > Adapters > OnDemand', () => {
     });
     
     it('should reject db.read()', async () => {
-      expect(db.read()).rejects.toThrow(KonroError("This method is not supported in 'on-demand' mode."));
+      expect(db.read()).rejects.toThrow(KonroError({ code: 'E400', methodName: 'read' }));
     });
 
     it('should reject db.write()', async () => {
-      expect(db.write()).rejects.toThrow(KonroError("This method is not supported in 'on-demand' mode."));
+      expect(db.write()).rejects.toThrow(KonroError({ code: 'E400', methodName: 'write' }));
     });
   });
 

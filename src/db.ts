@@ -1,157 +1,53 @@
 import path from 'path';
-import { AggregationDefinition, ColumnDefinition, KonroSchema, RelationDefinition } from './schema';
-import { StorageAdapter, FileStorageAdapter } from './adapter';
-import { DatabaseState, KRecord, TableState } from './types';
-import { _queryImpl, _insertImpl, _updateImpl, _deleteImpl, createEmptyState as createEmptyStateImpl, QueryDescriptor, _aggregateImpl, AggregationDescriptor } from './operations';
+import type {
+  AggregationDefinition,
+  KonroSchema,
+  StorageAdapter,
+  FileStorageAdapter,
+  DatabaseState,
+  KRecord,
+  TableState,
+  QueryDescriptor,
+  AggregationDescriptor,
+  WithArgument,
+  ResolveWith,
+  ChainedQueryBuilder,
+  QueryBuilder,
+  UpdateBuilder,
+  DeleteBuilder,
+  InMemoryDbContext,
+  OnDemandChainedQueryBuilder,
+  OnDemandQueryBuilder,
+  OnDemandUpdateBuilder,
+  OnDemandDeleteBuilder,
+  OnDemandDbContext,
+  DbContext,
+} from './types';
+import {
+  _queryImpl,
+  _insertImpl,
+  _updateImpl,
+  _deleteImpl,
+  createEmptyState as createEmptyStateImpl,
+  _aggregateImpl,
+} from './operations';
 import { createPredicateFromPartial } from './utils/predicate.util';
 import { KonroError, KonroStorageError } from './utils/error.util';
 import { writeAtomic } from './fs';
 
-// A helper to normalize a predicate argument
+export type { InMemoryDbContext, OnDemandDbContext, DbContext };
+
+// --- CORE LOGIC (STATELESS & PURE) ---
+
+/**
+ * A helper to normalize a predicate argument into a function.
+ */
 const normalizePredicate = <T extends KRecord>(
   predicate: Partial<T> | ((record: T) => boolean)
 ): ((record: KRecord) => boolean) =>
   // The cast is necessary due to function argument contravariance.
   // The internal operations work on the wider `KRecord`, while the fluent API provides the specific `T`.
   (typeof predicate === 'function' ? predicate : createPredicateFromPartial(predicate)) as (record: KRecord) => boolean;
-
-// --- TYPE HELPERS for Fluent API ---
-
-type RelatedModel<T> = T extends (infer R)[] ? R : T extends (infer R | null) ? R : T;
-
-// TAll is the full relational model type, e.g. schema.types.users
-type WithArgument<TAll> = { // e.g. TAll = S['types']['users']
-  [K in keyof TAll as NonNullable<TAll[K]> extends any[] | object ? K : never]?: boolean | ({
-    where?: (record: RelatedModel<NonNullable<TAll[K]>>) => boolean;
-  } & (
-    | { select: Record<string, ColumnDefinition<unknown>>; with?: never }
-    | { select?: never; with?: WithArgument<RelatedModel<NonNullable<TAll[K]>>> }
-  ));
-};
-
-type ResolveWith<
-  S extends KonroSchema<any, any>,
-  TName extends keyof S['tables'],
-  TWith extends WithArgument<S['types'][TName]>
-> = { // TName='users', TWith={posts: {with: {author: true}}}
-    [K in keyof TWith & keyof S['relations'][TName]]:
-        S['relations'][TName][K] extends { relationType: 'many' }
-            ? ( // 'many' relation -> array result. K = 'posts'
-                TWith[K] extends { select: infer TSelect }
-                    ? ({ [P in keyof TSelect]: InferColumnType<TSelect[P]> })[]
-                    : TWith[K] extends { with: infer TNestedWith }
-                        // S['relations']['users']['posts']['targetTable'] = 'posts'
-                        ? (S['base'][S['relations'][TName][K]['targetTable']] & ResolveWith<S, S['relations'][TName][K]['targetTable'], TNestedWith & WithArgument<S['types'][S['relations'][TName][K]['targetTable']]>>)[]
-                        // posts: true.
-                        : S['base'][S['relations'][TName][K]['targetTable']][]
-              )
-            : S['relations'][TName][K] extends { relationType: 'one' }
-                ? ( // 'one' relation -> nullable object result
-                    TWith[K] extends { select: infer TSelect }
-                        ? ({ [P in keyof TSelect]: InferColumnType<TSelect[P]> }) | null
-                        : TWith[K] extends { with: infer TNestedWith }
-                            ? (S['base'][S['relations'][TName][K]['targetTable']] & ResolveWith<S, S['relations'][TName][K]['targetTable'], TNestedWith & WithArgument<S['types'][S['relations'][TName][K]['targetTable']]>>) | null
-                            : S['base'][S['relations'][TName][K]['targetTable']] | null
-                  )
-                : never
-};
-
-// InferColumnType is not exported from schema, so we need it here too.
-type InferColumnType<C> = C extends ColumnDefinition<infer T> ? T : never;
-
-// --- IN-MEMORY API TYPES (STATEFUL) ---
-
-interface ChainedQueryBuilder<S extends KonroSchema<any, any>, TName extends keyof S['tables'], TReturn> {
-  select(fields: Record<string, ColumnDefinition<unknown> | RelationDefinition>): this;
-  where(predicate: Partial<S['base'][TName]> | ((record: S['base'][TName]) => boolean)): this;
-  withDeleted(): this;
-  with<W extends WithArgument<S['types'][TName]>>(relations: W): ChainedQueryBuilder<S, TName, TReturn & ResolveWith<S, TName, W>>;
-  limit(count: number): this;
-  offset(count: number): this;
-  all(): TReturn[];
-  first(): TReturn | null;
-  aggregate<TAggs extends Record<string, AggregationDefinition>>(
-    aggregations: TAggs
-  ): { [K in keyof TAggs]: number | null };
-}
-
-interface QueryBuilder<S extends KonroSchema<any, any>> {
-  from<T extends keyof S['tables']>(tableName: T): ChainedQueryBuilder<S, T, S['base'][T]>;
-}
-
-interface UpdateBuilder<S extends KonroSchema<any, any>, TBase, TCreate> {
-  set(data: Partial<TCreate>): {
-    where(predicate: Partial<TBase> | ((record: TBase) => boolean)): [DatabaseState<S>, TBase[]];
-  };
-}
-
-interface DeleteBuilder<S extends KonroSchema<any, any>, TBase> {
-  where(predicate: Partial<TBase> | ((record: TBase) => boolean)): [DatabaseState<S>, TBase[]];
-}
-
-export interface InMemoryDbContext<S extends KonroSchema<any, any>> {
-  schema: S;
-  adapter: StorageAdapter;
-  read(): Promise<DatabaseState<S>>;
-  write(state: DatabaseState<S>): Promise<void>;
-  createEmptyState(): DatabaseState<S>;
-
-  query(state: DatabaseState<S>): QueryBuilder<S>;
-  insert<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T, values: S['create'][T]): [DatabaseState<S>, S['base'][T]];
-  insert<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T, values: Readonly<S['create'][T]>[]): [DatabaseState<S>, S['base'][T][]];
-  update<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): UpdateBuilder<S, S['base'][T], S['create'][T]>;
-  delete<T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): DeleteBuilder<S, S['base'][T]>;
-}
-
-
-// --- ON-DEMAND API TYPES (STATELESS & ASYNC) ---
-
-interface OnDemandChainedQueryBuilder<S extends KonroSchema<any, any>, TName extends keyof S['tables'], TReturn> {
-  select(fields: Record<string, ColumnDefinition<unknown> | RelationDefinition>): this;
-  where(predicate: Partial<S['base'][TName]> | ((record: S['base'][TName]) => boolean)): this;
-  withDeleted(): this;
-  with<W extends WithArgument<S['types'][TName]>>(relations: W): OnDemandChainedQueryBuilder<S, TName, TReturn & ResolveWith<S, TName, W>>;
-  limit(count: number): this;
-  offset(count: number): this;
-  all(): Promise<TReturn[]>;
-  first(): Promise<TReturn | null>;
-  aggregate<TAggs extends Record<string, AggregationDefinition>>(
-    aggregations: TAggs
-  ): Promise<{ [K in keyof TAggs]: number | null }>;
-}
-
-interface OnDemandQueryBuilder<S extends KonroSchema<any, any>> {
-  from<T extends keyof S['tables']>(tableName: T): OnDemandChainedQueryBuilder<S, T, S['base'][T]>;
-}
-
-interface OnDemandUpdateBuilder<TBase, TCreate> {
-  set(data: Partial<TCreate>): {
-    where(predicate: Partial<TBase> | ((record: TBase) => boolean)): Promise<TBase[]>;
-  };
-}
-
-interface OnDemandDeleteBuilder<TBase> {
-  where(predicate: Partial<TBase> | ((record: TBase) => boolean)): Promise<TBase[]>;
-}
-
-export interface OnDemandDbContext<S extends KonroSchema<any, any>> {
-  schema: S;
-  adapter: StorageAdapter;
-  read(): Promise<never>; // Not supported in on-demand mode
-  write(): Promise<never>; // Not supported in on-demand mode
-  createEmptyState(): DatabaseState<S>;
-
-  query(): OnDemandQueryBuilder<S>;
-  insert<T extends keyof S['tables']>(tableName: T, values: S['create'][T]): Promise<S['base'][T]>;
-  insert<T extends keyof S['tables']>(tableName: T, values: Readonly<S['create'][T]>[]): Promise<S['base'][T][]>;
-  update<T extends keyof S['tables']>(tableName: T): OnDemandUpdateBuilder<S['base'][T], S['create'][T]>;
-  delete<T extends keyof S['tables']>(tableName: T): OnDemandDeleteBuilder<S['base'][T]>;
-}
-
-// --- DbContext Union Type ---
-export type DbContext<S extends KonroSchema<any, any>> = InMemoryDbContext<S> | OnDemandDbContext<S>;
-
-// --- CORE LOGIC (STATELESS & PURE) ---
 
 /**
  * Creates the core, stateless database operations.
@@ -162,15 +58,15 @@ function createCoreDbContext<S extends KonroSchema<any, any>>(schema: S) {
   const query = (state: DatabaseState<S>): QueryBuilder<S> => ({
     from: <TName extends keyof S['tables']>(tableName: TName): ChainedQueryBuilder<S, TName, S['base'][TName]> => {
       const createBuilder = <TReturn>(currentDescriptor: QueryDescriptor): ChainedQueryBuilder<S, TName, TReturn> => ({
-        select(fields) { return createBuilder<TReturn>({ ...currentDescriptor, select: fields }); },
-        where(predicate) { return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate as Parameters<typeof normalizePredicate>[0]) }); },
+        select(fields) { return createBuilder<TReturn>({ ...currentDescriptor, select: fields as QueryDescriptor['select'] }); },
+        where(predicate) { return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate) }); },
         withDeleted() { return createBuilder<TReturn>({ ...currentDescriptor, withDeleted: true }); },
         with<W extends WithArgument<S['types'][TName]>>(relations: W) {
           const newWith = { ...currentDescriptor.with, ...(relations as QueryDescriptor['with']) };
           return createBuilder<TReturn & ResolveWith<S, TName, W>>({ ...currentDescriptor, with: newWith });
         },
-        limit(count) { return createBuilder<TReturn>({ ...currentDescriptor, limit: count }); },
-        offset(count) { return createBuilder<TReturn>({ ...currentDescriptor, offset: count }); },
+        limit(count: number) { return createBuilder<TReturn>({ ...currentDescriptor, limit: count }); },
+        offset(count: number) { return createBuilder<TReturn>({ ...currentDescriptor, offset: count }); },
         all: (): TReturn[] => _queryImpl(state as DatabaseState, schema, currentDescriptor) as TReturn[],
         first: (): TReturn | null => (_queryImpl(state as DatabaseState, schema, { ...currentDescriptor, limit: 1 })[0] ?? null) as TReturn | null,
         aggregate: <TAggs extends Record<string, AggregationDefinition>>(aggregations: TAggs) => {
@@ -192,17 +88,17 @@ function createCoreDbContext<S extends KonroSchema<any, any>>(schema: S) {
   };
 
   const update = <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): UpdateBuilder<S, S['base'][T], S['create'][T]> => ({
-    set: (data) => ({
-      where: (predicate) => {
-        const [newState, updatedRecords] = _updateImpl(state as DatabaseState, schema, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate as Parameters<typeof normalizePredicate>[0]));
+    set: (data: Partial<S['create'][T]>) => ({
+      where: (predicate: Partial<S['base'][T]> | ((record: S['base'][T]) => boolean)): [DatabaseState<S>, S['base'][T][]] => {
+        const [newState, updatedRecords] = _updateImpl(state as DatabaseState, schema, tableName as string, data as Partial<KRecord>, normalizePredicate(predicate));
         return [newState as DatabaseState<S>, updatedRecords as S['base'][T][]];
       },
     }),
   });
 
   const del = <T extends keyof S['tables']>(state: DatabaseState<S>, tableName: T): DeleteBuilder<S, S['base'][T]> => ({
-    where: (predicate) => {
-      const [newState, deletedRecords] = _deleteImpl(state as DatabaseState, schema, tableName as string, normalizePredicate(predicate as Parameters<typeof normalizePredicate>[0]));
+    where: (predicate: Partial<S['base'][T]> | ((record: S['base'][T]) => boolean)): [DatabaseState<S>, S['base'][T][]] => {
+      const [newState, deletedRecords] = _deleteImpl(state as DatabaseState, schema, tableName as string, normalizePredicate(predicate));
       return [newState as DatabaseState<S>, deletedRecords as S['base'][T][]];
     },
   });
@@ -235,15 +131,15 @@ function createOnDemandDbContext<S extends KonroSchema<any, any>>(
   const query = (): OnDemandQueryBuilder<S> => ({
     from: <TName extends keyof S['tables']>(tableName: TName): OnDemandChainedQueryBuilder<S, TName, S['base'][TName]> => {
       const createBuilder = <TReturn>(currentDescriptor: QueryDescriptor): OnDemandChainedQueryBuilder<S, TName, TReturn> => ({
-        select(fields) { return createBuilder<TReturn>({ ...currentDescriptor, select: fields }); },
-        where(predicate) { return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate as Parameters<typeof normalizePredicate>[0]) }); },
+        select(fields) { return createBuilder<TReturn>({ ...currentDescriptor, select: fields as QueryDescriptor['select'] }); },
+        where(predicate) { return createBuilder<TReturn>({ ...currentDescriptor, where: normalizePredicate(predicate) }); },
         withDeleted() { return createBuilder<TReturn>({ ...currentDescriptor, withDeleted: true }); },
         with<W extends WithArgument<S['types'][TName]>>(relations: W) {
           const newWith = { ...currentDescriptor.with, ...(relations as QueryDescriptor['with']) };
           return createBuilder<TReturn & ResolveWith<S, TName, W>>({ ...currentDescriptor, with: newWith });
         },
-        limit(count) { return createBuilder<TReturn>({ ...currentDescriptor, limit: count }); },
-        offset(count) { return createBuilder<TReturn>({ ...currentDescriptor, offset: count }); },
+        limit(count: number) { return createBuilder<TReturn>({ ...currentDescriptor, limit: count }); },
+        offset(count: number) { return createBuilder<TReturn>({ ...currentDescriptor, offset: count }); },
         all: async (): Promise<TReturn[]> => {
           const state = await io.getFullState();
           return _queryImpl(state, schema, currentDescriptor) as TReturn[];
@@ -266,18 +162,28 @@ function createOnDemandDbContext<S extends KonroSchema<any, any>>(
     io.insert(core, tableName as string, values);
 
   const update = <T extends keyof S['tables']>(tableName: T): OnDemandUpdateBuilder<S['base'][T], S['create'][T]> => ({
-    set: (data) => ({
-      where: (predicate) => io.update(core, tableName as string, data, normalizePredicate(predicate as Parameters<typeof normalizePredicate>[0])) as Promise<S['base'][T][]>,
+    set: (data: Partial<S['create'][T]>) => ({
+      where: (predicate: Partial<S['base'][T]> | ((record: S['base'][T]) => boolean)) => io.update(core, tableName as string, data, normalizePredicate(predicate)) as Promise<S['base'][T][]>,
     }),
   });
 
   const del = <T extends keyof S['tables']>(tableName: T): OnDemandDeleteBuilder<S['base'][T]> => ({
-    where: (predicate) => io.delete(core, tableName as string, normalizePredicate(predicate as Parameters<typeof normalizePredicate>[0])) as Promise<S['base'][T][]>,
+    where: (predicate: Partial<S['base'][T]> | ((record: S['base'][T]) => boolean)) => io.delete(core, tableName as string, normalizePredicate(predicate)) as Promise<S['base'][T][]>,
   });
 
-  const notSupported = () => Promise.reject(KonroError("This method is not supported in 'on-demand' mode."));
+  const notSupported = (methodName: string) => () => Promise.reject(KonroError({ code: 'E400', methodName }));
 
-  return { schema, adapter, createEmptyState: () => createEmptyStateImpl(schema), read: notSupported, write: notSupported, query, insert, update, delete: del };
+  return {
+    schema,
+    adapter,
+    createEmptyState: () => createEmptyStateImpl(schema),
+    read: notSupported('read'),
+    write: notSupported('write'),
+    query,
+    insert,
+    update,
+    delete: del
+  };
 }
 
 
@@ -324,7 +230,7 @@ export function createDatabase<S extends KonroSchema<any, any>>(
       try {
         return serializer.parse(data, schema.tables[tableName]);
       } catch (e: any) {
-        throw KonroStorageError(`Failed to parse file at "${getTablePath(tableName)}". Original error: ${e.message}`);
+        throw KonroStorageError({ code: 'E103', filepath: getTablePath(tableName), format: fileExtension.slice(1), details: e.message });
       }
     };
 
@@ -367,7 +273,7 @@ export function createDatabase<S extends KonroSchema<any, any>>(
     const getMetaPath = (tableName: string) => path.join(getTableDir(tableName), '_meta.json');
     const getIdColumn = (tableName: string) => {
       const col = Object.keys(schema.tables[tableName]).find(k => schema.tables[tableName][k]?.dataType === 'id');
-      if (!col) throw KonroError(`Table "${tableName}" needs an 'id' column for 'per-record' mode.`);
+      if (!col) throw KonroError({ code: 'E202', tableName });
       return col;
     };
 
@@ -445,7 +351,7 @@ export function createDatabase<S extends KonroSchema<any, any>>(
 
   const io = fileAdapter.options.multi ? createMultiFileIO() : fileAdapter.options.perRecord ? createPerRecordIO() : null;
   if (!io) {
-    throw KonroError("The 'on-demand' mode requires a 'multi-file' or 'per-record' storage strategy.");
+    throw KonroError({ code: 'E104' });
   }
   
   return createOnDemandDbContext(schema, adapter, core, io);

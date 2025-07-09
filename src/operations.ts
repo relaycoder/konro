@@ -1,6 +1,13 @@
 import { randomUUID } from 'crypto';
-import { DatabaseState, KRecord } from './types';
-import { KonroSchema, RelationDefinition, ColumnDefinition, AggregationDefinition } from './schema';
+import type {
+  DatabaseState,
+  KRecord,
+  KonroSchema,
+  RelationDefinition,
+  WithClause,
+  QueryDescriptor,
+  AggregationDescriptor,
+} from './types';
 import { KonroError, KonroValidationError } from './utils/error.util';
 
 // --- HELPERS ---
@@ -17,27 +24,6 @@ export const createEmptyState = <S extends KonroSchema<any, any>>(schema: S): Da
 };
 
 // --- QUERY ---
-
-interface WithOptions {
-  select?: Record<string, ColumnDefinition<unknown>>;
-  where?: (record: KRecord) => boolean;
-  with?: WithClause;
-}
-type WithClause = Record<string, boolean | WithOptions>;
-
-export interface QueryDescriptor {
-  tableName: string;
-  select?: Record<string, ColumnDefinition<unknown> | RelationDefinition>;
-  where?: (record: KRecord) => boolean;
-  with?: WithClause;
-  limit?: number;
-  offset?: number;
-  withDeleted?: boolean;
-}
-
-export interface AggregationDescriptor extends QueryDescriptor {
-  aggregations: Record<string, AggregationDefinition>;
-}
 
 const _processWith = <S extends KonroSchema<any, any>>(
   recordsToProcess: KRecord[],
@@ -80,7 +66,7 @@ const _processWith = <S extends KonroSchema<any, any>>(
       // Then, apply select on the (potentially already processed) related records
       if (nestedSelect) {
         const targetTableSchema = schema.tables[relationDef.targetTable];
-        if (!targetTableSchema) throw KonroError(`Schema for table "${relationDef.targetTable}" not found.`);
+        if (!targetTableSchema) throw KonroError({ code: 'E201', tableName: relationDef.targetTable });
 
         processedRelatedRecords = processedRelatedRecords.map(rec => {
           const newRec: KRecord = {};
@@ -116,7 +102,7 @@ export const _queryImpl = <S extends KonroSchema<any, any>>(state: DatabaseState
   if (!tableState) return [];
 
   const tableSchema = schema.tables[descriptor.tableName];
-  if (!tableSchema) throw KonroError(`Schema for table "${descriptor.tableName}" not found.`);
+  if (!tableSchema) throw KonroError({ code: 'E201', tableName: descriptor.tableName });
   const deletedAtColumn = Object.keys(tableSchema).find(key => tableSchema[key]?.options?._konro_sub_type === 'deletedAt');
 
   // 1. Filter
@@ -212,7 +198,7 @@ export const _aggregateImpl = <S extends KonroSchema<any, any>>(
     }
 
     if (!aggDef.column) {
-      throw KonroError(`Aggregation '${aggDef.aggType}' requires a column.`);
+      throw KonroError({ code: 'E203', aggType: aggDef.aggType });
     }
     const column = aggDef.column;
 
@@ -249,12 +235,12 @@ export const _aggregateImpl = <S extends KonroSchema<any, any>>(
 
 export const _insertImpl = <S extends KonroSchema<any, any>>(state: DatabaseState, schema: S, tableName: string, values: KRecord[]): [DatabaseState, KRecord[]] => {
   const oldTableState = state[tableName];
-  if (!oldTableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
+  if (!oldTableState) throw KonroError({ code: 'E200', tableName });
 
   // To maintain immutability, we deep-clone only the table being modified.
   const tableState = structuredClone(oldTableState);
   const tableSchema = schema.tables[tableName];
-  if (!tableSchema) throw KonroError(`Schema for table "${tableName}" not found.`);
+  if (!tableSchema) throw KonroError({ code: 'E201', tableName });
   const insertedRecords: KRecord[] = [];
 
   for (const value of values) {
@@ -298,11 +284,11 @@ export const _insertImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
 
 export const _updateImpl = <S extends KonroSchema<any, any>>(state: DatabaseState, schema: S, tableName: string, data: Partial<KRecord>, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
   const oldTableState = state[tableName];
-  if (!oldTableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
+  if (!oldTableState) throw KonroError({ code: 'E200', tableName });
 
   const tableSchema = schema.tables[tableName];
   if (!tableSchema) {
-    throw KonroError(`Schema for table "${tableName}" not found.`);
+    throw KonroError({ code: 'E201', tableName });
   }
 
   const updatedRecords: KRecord[] = [];
@@ -396,9 +382,9 @@ function applyCascades<S extends KonroSchema<any, any>>(
 
 export const _deleteImpl = (state: DatabaseState, schema: KonroSchema<any, any>, tableName: string, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
   const oldTableState = state[tableName];
-  if (!oldTableState) throw KonroError(`Table "${tableName}" does not exist in the database state.`);
+  if (!oldTableState) throw KonroError({ code: 'E200', tableName });
   const tableSchema = schema.tables[tableName];
-  if (!tableSchema) throw KonroError(`Schema for table "${tableName}" not found.`);
+  if (!tableSchema) throw KonroError({ code: 'E201', tableName });
 
   const deletedAtColumn = Object.keys(tableSchema).find(key => tableSchema[key]?.options?._konro_sub_type === 'deletedAt');
 
@@ -445,24 +431,24 @@ const validateRecord = (record: KRecord, tableSchema: Record<string, any>, exist
 
     // Validate unique constraint
     if (options.unique && existingRecords.some(r => r[columnName] === value)) {
-      throw KonroValidationError(`Value '${String(value)}' for column '${columnName}' must be unique`);
+      throw KonroValidationError({ code: 'E300', value: String(value), columnName });
     }
 
     // Validate string constraints
     if (colDef.dataType === 'string' && typeof value === 'string') {
       // Min length
       if (options.min !== undefined && value.length < options.min) {
-        throw KonroValidationError(`String '${value}' for column '${columnName}' is too short (min: ${options.min})`);
+        throw KonroValidationError({ code: 'E301', value, columnName, min: options.min });
       }
 
       // Max length
       if (options.max !== undefined && value.length > options.max) {
-        throw KonroValidationError(`String '${value}' for column '${columnName}' is too long (max: ${options.max})`);
+        throw KonroValidationError({ code: 'E302', value, columnName, max: options.max });
       }
 
       // Format validation
       if (options.format === 'email' && !isValidEmail(value)) {
-        throw KonroValidationError(`Value '${value}' for column '${columnName}' is not a valid email`);
+        throw KonroValidationError({ code: 'E303', value, columnName });
       }
     }
 
@@ -470,12 +456,12 @@ const validateRecord = (record: KRecord, tableSchema: Record<string, any>, exist
     if (colDef.dataType === 'number' && typeof value === 'number') {
       // Min value
       if (options.min !== undefined && value < options.min) {
-        throw KonroValidationError(`Number ${value} for column '${columnName}' is too small (min: ${options.min})`);
+        throw KonroValidationError({ code: 'E304', value, columnName, min: options.min });
       }
 
       // Max value
       if (options.max !== undefined && value > options.max) {
-        throw KonroValidationError(`Number ${value} for column '${columnName}' is too large (max: ${options.max})`);
+        throw KonroValidationError({ code: 'E305', value, columnName, max: options.max });
       }
     }
   }

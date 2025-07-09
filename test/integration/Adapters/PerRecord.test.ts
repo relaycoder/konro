@@ -29,7 +29,7 @@ describe('Integration > Adapters > PerRecord', () => {
           format: 'csv',
           perRecord: { dir: dbDirPath },
         });
-      }).toThrow(KonroError("The 'per-record' strategy only supports 'json' or 'yaml' formats."));
+      }).toThrow(KonroError({ code: 'E105' }));
     });
   });
 

@@ -1,15 +1,7 @@
 import { promises as fs } from 'fs';
 import path from 'path';
 import { TEMP_FILE_SUFFIX } from './utils/constants';
-
-export interface FsProvider {
-  readFile(filepath: string): Promise<string | null>;
-  writeFile(filepath: string, content: string, encoding: 'utf-8'): Promise<void>;
-  rename(oldPath: string, newPath: string): Promise<void>;
-  mkdir(dir: string, options: { recursive: true }): Promise<string | undefined>;
-  readdir(dir: string): Promise<string[]>;
-  unlink(filepath: string): Promise<void>;
-}
+import type { FsProvider } from './types';
 
 export const defaultFsProvider: FsProvider = {
   readFile: async (filepath: string): Promise<string | null> => {

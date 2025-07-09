@@ -1,39 +1,24 @@
 import path from 'path';
-import type { DatabaseState, KRecord, TableState } from './types';
+import type {
+  DatabaseState,
+  KRecord,
+  TableState,
+  StorageAdapter,
+  FileStorageAdapter,
+  FileAdapterOptions,
+  ColumnDefinition,
+  SingleFileStrategy,
+  MultiFileStrategy,
+  PerRecordStrategy,
+  KonroSchema,
+  Serializer,
+  FsProvider,
+} from './types';
 import { createEmptyState } from './operations';
-import type { ColumnDefinition, KonroSchema } from './schema';
-import { getSerializer, type Serializer } from './utils/serializer.util';
-import { FsProvider, defaultFsProvider, writeAtomic } from './fs';
+import { getSerializer } from './utils/serializer.util';
+import { defaultFsProvider, writeAtomic } from './fs';
 import { KonroError, KonroStorageError } from './utils/error.util';
 import { TEMP_FILE_SUFFIX } from './utils/constants';
-
-export interface StorageAdapter {
-  read<S extends KonroSchema<any, any>>(schema: S): Promise<DatabaseState<S>>;
-  write(state: DatabaseState<any>, schema: KonroSchema<any, any>): Promise<void>;
-  readonly mode: 'in-memory' | 'on-demand';
-}
-
-export interface FileStorageAdapter extends StorageAdapter {
-  readonly options: FileAdapterOptions;
-  readonly fs: FsProvider;
-  readonly serializer: Serializer;
-  readonly fileExtension: string;
-}
-
-type SingleFileStrategy = { single: { filepath: string }; multi?: never; perRecord?: never };
-type MultiFileStrategy = { multi: { dir: string }; single?: never; perRecord?: never };
-type PerRecordStrategy = { perRecord: { dir: string }; single?: never; multi?: never };
-
-export type FileAdapterOptions = {
-  format: 'json' | 'yaml' | 'csv' | 'xlsx';
-  fs?: FsProvider;
-  /**
-   * Defines the data access strategy.
-   * - `in-memory`: (Default) Loads the entire database into memory on init. Fast for small/medium datasets.
-   * - `on-demand`: Reads from the file system for each query. Slower but supports larger datasets. Requires 'multi-file' or 'per-record' strategy.
-   */
-  mode?: 'in-memory' | 'on-demand';
-} & (SingleFileStrategy | MultiFileStrategy | PerRecordStrategy);
 
 export function createFileAdapter(options: FileAdapterOptions & { mode: 'on-demand' }): FileStorageAdapter & { mode: 'on-demand' };
 export function createFileAdapter(options: FileAdapterOptions & { mode?: 'in-memory' | undefined }): FileStorageAdapter & { mode: 'in-memory' };
@@ -45,16 +30,16 @@ export function createFileAdapter(options: FileAdapterOptions): FileStorageAdapt
   const mode = options.mode ?? 'in-memory';
 
   if (options.perRecord && options.format !== 'json' && options.format !== 'yaml') {
-    throw KonroError(`The 'per-record' strategy only supports 'json' or 'yaml' formats.`);
+    throw KonroError({ code: 'E105' });
   }
 
   const isTabular = options.format === 'csv' || options.format === 'xlsx';
   if (isTabular && (mode !== 'on-demand' || !options.multi)) {
-    throw KonroError(`The '${options.format}' format only supports 'on-demand' mode with a 'multi-file' strategy.`);
+    throw KonroError({ code: 'E106', format: options.format });
   }
 
   if (mode === 'on-demand' && options.single) {
-    throw KonroError("The 'on-demand' mode requires the 'multi-file' or 'per-record' storage strategy.");
+    throw KonroError({ code: 'E104' });
   }
 
   const strategy = createStrategy(options, { fs, serializer, fileExtension, mode });
@@ -89,7 +74,7 @@ function createStrategy(options: FileAdapterOptions, context: StrategyContext): 
     return createPerRecordStrategy(options.perRecord, context);
   }
   // This case should be prevented by the types, but as a safeguard:
-  throw KonroError('Invalid file adapter options: missing storage strategy.');
+  throw KonroError({ code: 'E107' });
 }
 
 /** Creates the strategy for reading/writing the entire database to a single file. */
@@ -103,7 +88,7 @@ function createSingleFileStrategy(options: SingleFileStrategy['single'], context
       return serializer.parse<T>(data, schema);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${context.fileExtension.slice(1)} file. Original error: ${message}`);
+      throw KonroStorageError({ code: 'E103', filepath, format: context.fileExtension.slice(1), details: message });
     }
   };
 
@@ -127,7 +112,7 @@ function createMultiFileStrategy(options: MultiFileStrategy['multi'], context: S
       return serializer.parse<T>(data, schema);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${fileExtension.slice(1)} file. Original error: ${message}`);
+      throw KonroStorageError({ code: 'E103', filepath, format: fileExtension.slice(1), details: message });
     }
   };
 
@@ -166,7 +151,7 @@ function createPerRecordStrategy(options: PerRecordStrategy['perRecord'], contex
       return serializer.parse<T>(data);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      throw KonroStorageError(`Failed to parse file at "${filepath}". It may be corrupt or not a valid ${context.fileExtension.slice(1)} file. Original error: ${message}`);
+      throw KonroStorageError({ code: 'E103', filepath, format: context.fileExtension.slice(1), details: message });
     }
   };
 
@@ -211,7 +196,7 @@ function createPerRecordStrategy(options: PerRecordStrategy['perRecord'], contex
         await writeAtomic(path.join(tableDir, '_meta.json'), JSON.stringify(tableState.meta, null, 2), fs);
 
         const idColumn = Object.keys(schema.tables[tableName]).find((k) => schema.tables[tableName][k]?.dataType === 'id');
-        if (!idColumn) throw KonroError(`Table "${tableName}" must have an 'id' column for 'per-record' storage.`);
+        if (!idColumn) throw KonroError({ code: 'E202', tableName });
 
         const currentFiles = new Set(tableState.records.map((r: KRecord) => `${r[idColumn]}${fileExtension}`));
         const existingFiles = (await fs.readdir(tableDir)).filter(f => !f.startsWith('_meta') && !f.endsWith(TEMP_FILE_SUFFIX));

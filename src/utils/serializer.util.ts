@@ -1,5 +1,5 @@
 import { KonroStorageError } from './error.util';
-import type { ColumnDefinition } from '../schema';
+import type { ColumnDefinition, Serializer } from '../types';
 
 const loadOptional = <T>(name: string): T | undefined => {
   try {
@@ -12,11 +12,6 @@ const loadOptional = <T>(name: string): T | undefined => {
 const yaml = loadOptional<{ load: (str: string) => unknown; dump: (obj: any, options?: any) => string }>('js-yaml');
 const papaparse = loadOptional<{ parse: (str: string, config?: any) => { data: any[] }; unparse: (data: any[] | object) => string; }>('papaparse');
 const xlsx = loadOptional<{ read: (data: any, opts: any) => any; utils: { sheet_to_json: <T>(ws: any) => T[]; json_to_sheet: (json: any) => any; book_new: () => any; book_append_sheet: (wb: any, ws: any, name: string) => void; }; write: (wb: any, opts: any) => any; }>('xlsx');
-
-export type Serializer = {
-  parse: <T>(data: string, tableSchema?: Record<string, ColumnDefinition<any>>) => T;
-  stringify: (obj: any) => string;
-};
 
 /** For tabular formats (CSV/XLSX), metadata isn't stored. We derive lastId from the data itself. */
 const deriveLastIdFromRecords = (records: any[], tableSchema: Record<string, ColumnDefinition<any>>): number => {
@@ -37,13 +32,13 @@ export const getSerializer = (format: 'json' | 'yaml' | 'csv' | 'xlsx'): Seriali
         stringify: (obj: any): string => JSON.stringify(obj, null, 2),
       };
     case 'yaml':
-      if (!yaml) throw KonroStorageError("The 'yaml' format requires 'js-yaml' to be installed. Please run 'npm install js-yaml'.");
+      if (!yaml) throw KonroStorageError({ code: 'E101', format: 'yaml', dependency: 'js-yaml' });
       return {
         parse: <T>(data: string): T => yaml.load(data) as T,
         stringify: (obj: any): string => yaml.dump(obj),
       };
     case 'csv':
-      if (!papaparse) throw KonroStorageError("The 'csv' format requires 'papaparse' to be installed. Please run 'npm install papaparse'.");
+      if (!papaparse) throw KonroStorageError({ code: 'E101', format: 'csv', dependency: 'papaparse' });
       return {
         parse: <T>(data: string, tableSchema?: Record<string, ColumnDefinition<any>>): T => {
           const { data: records } = papaparse.parse(data, { header: true, dynamicTyping: true, skipEmptyLines: true });
@@ -53,7 +48,7 @@ export const getSerializer = (format: 'json' | 'yaml' | 'csv' | 'xlsx'): Seriali
         stringify: (obj: any): string => papaparse.unparse(obj.records || []),
       };
     case 'xlsx':
-      if (!xlsx) throw KonroStorageError("The 'xlsx' format requires 'xlsx' to be installed. Please run 'npm install xlsx'.");
+      if (!xlsx) throw KonroStorageError({ code: 'E101', format: 'xlsx', dependency: 'xlsx' });
       return {
         parse: <T>(data: string, tableSchema?: Record<string, ColumnDefinition<any>>): T => {
           const workbook = xlsx.read(data, { type: 'base64' });
@@ -72,6 +67,6 @@ export const getSerializer = (format: 'json' | 'yaml' | 'csv' | 'xlsx'): Seriali
         },
       };
     default:
-      throw KonroStorageError(`Unsupported or invalid format specified.`);
+      throw KonroStorageError({ code: 'E102', format });
   }
 };

@@ -251,17 +251,17 @@ export function createDatabase<S extends KonroSchema<any, any>>(
       update: async (core, tableName, data, predicate) => {
         const state = createEmptyStateImpl(schema);
         (state as any)[tableName] = await readTableState(tableName);
-        const [newState, result] = core.update(state, tableName as keyof S["tables"]).set(data as any).where(predicate);
-        if (result.length > 0) await writeTableState(tableName, newState[tableName]!);
-        return result as any;
+        const [newState, result] = core.update(state, tableName as keyof S['tables']).set(data).where(predicate as any);
+        await writeTableState(tableName, newState[tableName]!);
+        return result;
       },
       delete: async (core, tableName, predicate) => {
-        const state = await getFullState(); // Cascades require full state
-        const [newState, deletedRecords] = core.delete(state, tableName as keyof S["tables"]).where(predicate);
-        const changedTables = Object.keys(newState).filter(k => newState[k as keyof typeof newState] !== state[k as keyof typeof state]);
-        await Promise.all(changedTables.map(t => writeTableState(t, newState[t as keyof typeof newState]!)));
-        return deletedRecords as any;
-      },
+        const state = createEmptyStateImpl(schema);
+        (state as any)[tableName] = await readTableState(tableName);
+        const [newState, result] = core.delete(state, tableName as keyof S['tables']).where(predicate as any);
+        await writeTableState(tableName, newState[tableName]!);
+        return result;
+      }
     };
   };
 
@@ -280,79 +280,41 @@ export function createDatabase<S extends KonroSchema<any, any>>(
     return {
       getFullState,
       insert: async (core, tableName, values) => {
-        const metaContent = await fs.readFile(getMetaPath(tableName)).catch(() => null);
-        const meta = metaContent ? JSON.parse(metaContent) : { lastId: 0 };
-        const idCol = getIdColumn(tableName);
-
-        // Perform insert without existing records for performance
-        const [newState, inserted] = core.insert({ [tableName]: { records: [], meta } } as any, tableName as keyof S['tables'], values as any);
-        const insertedArr = Array.isArray(inserted) ? inserted : (inserted ? [inserted] : []);
-        if (insertedArr.length === 0) return inserted;
-
-        // Write new records and update meta if it changed
-        await fs.mkdir(getTableDir(tableName), { recursive: true });
-        const newMeta = newState[tableName]?.meta;
-        const promises = insertedArr.map((r) => writeAtomic(getRecordPath(tableName, r[idCol]), serializer.stringify(r), fs));
-        if (newMeta && newMeta.lastId !== meta.lastId) {
-          promises.push(writeAtomic(getMetaPath(tableName), JSON.stringify(newMeta, null, 2), fs));
-        }
-        await Promise.all(promises);
-        return inserted;
+        const idColumn = getIdColumn(tableName);
+        if (!idColumn) throw KonroError({ code: 'E202', tableName });
+        
+        const state = createEmptyStateImpl(schema);
+        (state as any)[tableName] = await readTableState(tableName);
+        
+        const [newState, result] = core.insert(state, tableName as keyof S['tables'], values as any);
+        await writeTableState(tableName, newState[tableName]!, idColumn);
+        return result;
       },
       update: async (core, tableName, data, predicate) => {
-        const state = await getFullState(); // Update needs full table state for predicate
-        const [newState, updated] = core.update(state, tableName as keyof S["tables"]).set(data as any).where(predicate);
-        if (updated.length === 0) return updated as any;
-
-        const idCol = getIdColumn(tableName);
-        await Promise.all(updated.map((r: any) => writeAtomic(getRecordPath(tableName, r[idCol]), serializer.stringify(r), fs)));
+        const idColumn = getIdColumn(tableName);
+        if (!idColumn) throw KonroError({ code: 'E202', tableName });
         
-        const newMeta = newState[tableName]?.meta;
-        const oldMeta = state[tableName as keyof typeof state]?.meta;
-        if (newMeta && JSON.stringify(newMeta) !== JSON.stringify(oldMeta)) {
-            await writeAtomic(getMetaPath(tableName), JSON.stringify(newMeta, null, 2), fs);
-        }
-        return updated as any;
+        const state = createEmptyStateImpl(schema);
+        (state as any)[tableName] = await readTableState(tableName);
+        
+        const [newState, result] = core.update(state, tableName as keyof S['tables']).set(data).where(predicate as any);
+        await writeTableState(tableName, newState[tableName]!, idColumn);
+        return result;
       },
       delete: async (core, tableName, predicate) => {
-        const oldState = await getFullState();
-        const [newState, deletedRecords] = core.delete(oldState, tableName as keyof S["tables"]).where(predicate);
-        if (deletedRecords.length === 0) return deletedRecords as any;
+        const idColumn = getIdColumn(tableName);
+        if (!idColumn) throw KonroError({ code: 'E202', tableName });
 
-        const changes = Object.keys(schema.tables).map(async tName => {
-          const oldTState = oldState[tName as keyof typeof oldState]!;
-          const newTState = newState[tName as keyof typeof newState]!;
-          if (oldTState === newTState) return;
+        const state = createEmptyStateImpl(schema);
+        (state as any)[tableName] = await readTableState(tableName);
 
-          const idCol = getIdColumn(tName);
-          const oldMap = new Map(oldTState.records.map((r: any) => [r[idCol], r]));
-          const newMap = new Map(newTState.records.map((r: any) => [r[idCol], r]));
-          
-          const promises: Promise<void>[] = [];
-          if (JSON.stringify(oldTState.meta) !== JSON.stringify(newTState.meta)) {
-            promises.push(fs.mkdir(getTableDir(tName), { recursive: true }).then(() =>
-              writeAtomic(getMetaPath(tName), JSON.stringify(newTState.meta, null, 2), fs))
-            );
-          }
-          newMap.forEach((rec, id) => {
-            if (oldMap.get(id) !== rec) promises.push(writeAtomic(getRecordPath(tName, id), serializer.stringify(rec), fs));
-          });
-          oldMap.forEach((_rec, id) => {
-            if (!newMap.has(id)) promises.push(fs.unlink(getRecordPath(tName, id)));
-          });
-          await Promise.all(promises);
-        });
-
-        await Promise.all(changes);
-        return deletedRecords as any;
-      },
+        const [newState, result] = core.delete(state, tableName as keyof S['tables']).where(predicate as any);
+        await writeTableState(tableName, newState[tableName]!, idColumn);
+        return result;
+      }
     };
   };
 
-  const io = fileAdapter.options.multi ? createMultiFileIO() : fileAdapter.options.perRecord ? createPerRecordIO() : null;
-  if (!io) {
-    throw KonroError({ code: 'E104' });
-  }
-  
+  const io = fileAdapter.options.multi ? createMultiFileIO() : createPerRecordIO();
   return createOnDemandDbContext(schema, adapter, core, io);
 }

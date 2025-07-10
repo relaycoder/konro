@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+1. make the `bun test` of konro/konro-examples passed by prioritize identifying problem on konro to fix.
+2. konro/konro-examples should only allowed to use published npm konro than direct linking.
+3. so you have to always doing 2 phase on updating `npm version patch` then `bun publish` then in konro/konro-examples `bun update konro`
+4. your main task is make sure no konro problems on compiled without e2e type regression.

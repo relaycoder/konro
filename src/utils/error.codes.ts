@@ -19,9 +19,9 @@ export const KONRO_ERROR_CODES = {
   E203: 'Aggregation `{{aggType}}` requires a column.',
 
   // Validation Errors
-  E300: `Value '{{value}}' for column '{{columnName}}' must be unique.`,
-  E301: `String '{{value}}' for column '{{columnName}}' is too short (min: {{min}}).`,
-  E302: `String '{{value}}' for column '{{columnName}}' is too long (max: {{max}}).`,
+  E300: `Validation Error: Value '{{value}}' for column '{{columnName}}' must be unique.`,
+  E301: `Validation Error: Missing required value for column '{{columnName}}'.`,
+  E302: `Validation Error: Invalid value for column '{{columnName}}'. Expected {{expected}}, got {{got}}.`,
   E303: `Value '{{value}}' for column '{{columnName}}' is not a valid email.`,
   E304: `Number {{value}} for column '{{columnName}}' is too small (min: {{min}}).`,
   E305: `Number {{value}} for column '{{columnName}}' is too large (max: {{max}}).`,

@@ -167,11 +167,11 @@ function createPerRecordStrategy(options: PerRecordStrategy['perRecord'], contex
 
           await fs.mkdir(tableDir, { recursive: true });
 
-          const metaContent = await fs.readFile(path.join(tableDir, '__meta.json')).catch(() => null);
+          const metaContent = await fs.readFile(path.join(tableDir, '_meta.json')).catch(() => null);
           if (metaContent) currentTableState.meta = JSON.parse(metaContent);
 
           const files = await fs.readdir(tableDir);
-          const recordFiles = files.filter((f) => !f.startsWith('__meta'));
+          const recordFiles = files.filter((f) => !f.startsWith('_meta'));
           const records = (await Promise.all(recordFiles.map((file) => parseFile<KRecord>(path.join(tableDir, file))))).filter((r): r is KRecord => r != null);
           currentTableState.records = records as any;
 
@@ -193,13 +193,13 @@ function createPerRecordStrategy(options: PerRecordStrategy['perRecord'], contex
       await Promise.all(Object.entries(state).map(async ([tableName, tableState]) => {
         const tableDir = path.join(options.dir, tableName as string);
         await fs.mkdir(tableDir, { recursive: true });
-        await writeAtomic(path.join(tableDir, '__meta.json'), JSON.stringify(tableState.meta, null, 2), fs);
+        await writeAtomic(path.join(tableDir, '_meta.json'), JSON.stringify(tableState.meta, null, 2), fs);
 
         const idColumn = Object.keys(schema.tables[tableName]).find((k) => schema.tables[tableName][k]?.dataType === 'id');
         if (!idColumn) throw KonroError({ code: 'E202', tableName });
 
         const currentFiles = new Set(tableState.records.map((r: KRecord) => `${r[idColumn]}${fileExtension}`));
-        const existingFiles = (await fs.readdir(tableDir)).filter(f => !f.startsWith('__meta') && !f.endsWith(TEMP_FILE_SUFFIX));
+        const existingFiles = (await fs.readdir(tableDir)).filter(f => !f.startsWith('_meta') && !f.endsWith(TEMP_FILE_SUFFIX));
 
         const recordWrites = tableState.records.map((r) => writeAtomic(path.join(tableDir, `${r[idColumn]}${fileExtension}`), serializer.stringify(r), fs));
         const recordDeletes = existingFiles.filter(f => !currentFiles.has(f)).map(f => fs.unlink(path.join(tableDir, f as string)));

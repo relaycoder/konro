@@ -34,6 +34,7 @@ import {
 import { createPredicateFromPartial } from './utils/predicate.util';
 import { KonroError, KonroStorageError } from './utils/error.util';
 import { writeAtomic } from './fs';
+import { TEMP_FILE_SUFFIX } from './utils/constants';
 
 export type { InMemoryDbContext, OnDemandDbContext, DbContext };
 
@@ -272,42 +273,86 @@ export function createDatabase<S extends KonroSchema<any, any>>(
     const getRecordPath = (tableName: string, id: any) => path.join(getTableDir(tableName), `${id}${fileExtension}`);
     const getMetaPath = (tableName: string) => path.join(getTableDir(tableName), '_meta.json');
     const getIdColumn = (tableName: string) => {
-      const col = Object.keys(schema.tables[tableName]).find(k => schema.tables[tableName][k]?.dataType === 'id');
-      if (!col) throw KonroError({ code: 'E202', tableName });
-      return col;
+      const idCol = Object.keys(schema.tables[tableName]).find((k) => schema.tables[tableName][k]?.options?._pk_strategy === 'auto-increment' || schema.tables[tableName][k]?.dataType === 'id');
+      if (!idCol) throw KonroError({ code: 'E202', tableName });
+      return idCol;
+    };
+
+    const readTableState = async (tableName: string): Promise<TableState> => {
+      const tableDir = getTableDir(tableName);
+      await fs.mkdir(tableDir, { recursive: true });
+
+      const metaPath = getMetaPath(tableName);
+      const metaContent = await fs.readFile(metaPath).catch(() => null);
+      const meta = metaContent ? JSON.parse(metaContent) : { lastId: 0 };
+
+      const files = await fs.readdir(tableDir);
+      const recordFiles = files.filter((f) => !f.startsWith('_meta') && !f.endsWith(TEMP_FILE_SUFFIX));
+      
+      const records = (
+        await Promise.all(recordFiles.map(async (file) => {
+          const data = await fs.readFile(path.join(tableDir, file));
+          if (!data) return null;
+          try {
+            return serializer.parse<KRecord>(data);
+          } catch (e: any) {
+            throw KonroStorageError({ code: 'E103', filepath: path.join(tableDir, file), format: fileExtension.slice(1), details: e.message });
+          }
+        }))
+      ).filter((r): r is KRecord => r != null);
+
+      if (meta.lastId === 0) {
+        const idCol = getIdColumn(tableName);
+        if (idCol) {
+          meta.lastId = records.reduce((maxId: number, record: KRecord) => {
+            const id = record[idCol];
+            return typeof id === 'number' && id > maxId ? id : maxId;
+          }, 0);
+        }
+      }
+
+      return { meta, records: records as any[] };
+    };
+
+    const writeTableState = async (tableName: string, tableState: TableState, idColumn: string): Promise<void> => {
+      const tableDir = getTableDir(tableName);
+      await fs.mkdir(tableDir, { recursive: true });
+      await writeAtomic(getMetaPath(tableName), JSON.stringify(tableState.meta, null, 2), fs);
+
+      const currentFiles = new Set(tableState.records.map((r) => `${(r as KRecord)[idColumn]}${fileExtension}`));
+      const existingFiles = (await fs.readdir(tableDir)).filter(f => !f.startsWith('_meta') && !f.endsWith(TEMP_FILE_SUFFIX));
+
+      const recordWrites = tableState.records.map((r) =>
+        writeAtomic(getRecordPath(tableName, (r as KRecord)[idColumn]), serializer.stringify(r), fs)
+      );
+      const recordDeletes = existingFiles.filter(f => !currentFiles.has(f)).map(f =>
+        fs.unlink(path.join(tableDir, f as string))
+      );
+      await Promise.all([...recordWrites, ...recordDeletes]);
     };
 
     return {
       getFullState,
       insert: async (core, tableName, values) => {
         const idColumn = getIdColumn(tableName);
-        if (!idColumn) throw KonroError({ code: 'E202', tableName });
-        
         const state = createEmptyStateImpl(schema);
         (state as any)[tableName] = await readTableState(tableName);
-        
         const [newState, result] = core.insert(state, tableName as keyof S['tables'], values as any);
         await writeTableState(tableName, newState[tableName]!, idColumn);
         return result;
       },
       update: async (core, tableName, data, predicate) => {
         const idColumn = getIdColumn(tableName);
-        if (!idColumn) throw KonroError({ code: 'E202', tableName });
-        
         const state = createEmptyStateImpl(schema);
         (state as any)[tableName] = await readTableState(tableName);
-        
         const [newState, result] = core.update(state, tableName as keyof S['tables']).set(data).where(predicate as any);
         await writeTableState(tableName, newState[tableName]!, idColumn);
         return result;
       },
       delete: async (core, tableName, predicate) => {
         const idColumn = getIdColumn(tableName);
-        if (!idColumn) throw KonroError({ code: 'E202', tableName });
-
         const state = createEmptyStateImpl(schema);
         (state as any)[tableName] = await readTableState(tableName);
-
         const [newState, result] = core.delete(state, tableName as keyof S['tables']).where(predicate as any);
         await writeTableState(tableName, newState[tableName]!, idColumn);
         return result;

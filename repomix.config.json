@@ -12,7 +12,7 @@
     "files": true,
     "removeComments": false,
     "removeEmptyLines": false,
-    "compress": false,
+    "compress": true,
     "topFilesLength": 5,
     "showLineNumbers": false,
     "copyToClipboard": true,
@@ -26,14 +26,14 @@
     "package.json",
     "tsconfig.json", 
     "tsconfig.build.json",
-    // "src",
+    "src",
     // "test"
 
-    "src/types.ts",
-    "src/index.ts",
-    "src/db.ts",
-    "src/schema.ts",
-    "src/operations.ts"
+    // "src/types.ts",
+    // "src/index.ts",
+    // "src/db.ts",
+    // "src/schema.ts",
+    // "src/operations.ts"
 
     // "test/integration/InMemoryFlow/CrudCycle.test.ts",
     // "test/integration/Adapters/PerRecord.test.ts",
@@ -57,7 +57,9 @@
     "useDefaultPatterns": true,
     "customPatterns": [
       // "test/unit",
-      // "src/utils"
+         "src/index.ts",
+      "src/types.ts",
+      "src/utils"
       // "src/utils"
     ]
   },

@@ -101,3 +101,37 @@ Repeat this block for each replacement.
 test is the real lib usage scenario,  test import from compiled code are passing but linter problems. so fix the main uncompiled program. as I am understand current program is highly deep recursive check types...
 
 I want your detailed plan in separated file path changes . in report format, without code!. 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

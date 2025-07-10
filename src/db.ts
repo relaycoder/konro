@@ -278,6 +278,24 @@ export function createDatabase<S extends KonroSchema<any, any>>(
       return idCol;
     };
 
+    const writeTableState = async (tableName: string, tableState: TableState, idColumn: string): Promise<void> => {
+      const tableDir = getTableDir(tableName);
+      await fs.mkdir(tableDir, { recursive: true });
+      await writeAtomic(getMetaPath(tableName), JSON.stringify(tableState.meta, null, 2), fs);
+
+      const currentFiles = new Set(tableState.records.map((r) => `${(r as KRecord)[idColumn]}${fileExtension}`));
+      const existingFiles = (await fs.readdir(tableDir)).filter(f => !f.startsWith('_meta') && !f.endsWith(TEMP_FILE_SUFFIX));
+
+      const recordWrites = tableState.records.map((r) =>
+        writeAtomic(getRecordPath(tableName, (r as KRecord)[idColumn]), serializer.stringify(r), fs)
+      );
+      const recordDeletes = existingFiles.filter(f => !currentFiles.has(f)).map(f =>
+        fs.unlink(path.join(tableDir, f as string))
+      );
+      await Promise.all([...recordWrites, ...recordDeletes]);
+    };
+
+    /*
     const readTableState = async (tableName: string): Promise<TableState> => {
       const tableDir = getTableDir(tableName);
       await fs.mkdir(tableDir, { recursive: true });
@@ -313,46 +331,42 @@ export function createDatabase<S extends KonroSchema<any, any>>(
 
       return { meta, records: records as any[] };
     };
-
-    const writeTableState = async (tableName: string, tableState: TableState, idColumn: string): Promise<void> => {
-      const tableDir = getTableDir(tableName);
-      await fs.mkdir(tableDir, { recursive: true });
-      await writeAtomic(getMetaPath(tableName), JSON.stringify(tableState.meta, null, 2), fs);
-
-      const currentFiles = new Set(tableState.records.map((r) => `${(r as KRecord)[idColumn]}${fileExtension}`));
-      const existingFiles = (await fs.readdir(tableDir)).filter(f => !f.startsWith('_meta') && !f.endsWith(TEMP_FILE_SUFFIX));
-
-      const recordWrites = tableState.records.map((r) =>
-        writeAtomic(getRecordPath(tableName, (r as KRecord)[idColumn]), serializer.stringify(r), fs)
-      );
-      const recordDeletes = existingFiles.filter(f => !currentFiles.has(f)).map(f =>
-        fs.unlink(path.join(tableDir, f as string))
-      );
-      await Promise.all([...recordWrites, ...recordDeletes]);
-    };
+    */
 
     return {
       getFullState,
       insert: async (core, tableName, values) => {
         const idColumn = getIdColumn(tableName);
-        const state = createEmptyStateImpl(schema);
-        (state as any)[tableName] = await readTableState(tableName);
+        const metaPath = getMetaPath(tableName);
+        const metaContent = await fs.readFile(metaPath).catch(() => null);
+        const meta = metaContent ? JSON.parse(metaContent) : { lastId: 0 };
+        const state = {
+          [tableName]: { meta, records: [] },
+        } as unknown as DatabaseState<S>;
         const [newState, result] = core.insert(state, tableName as keyof S['tables'], values as any);
-        await writeTableState(tableName, newState[tableName]!, idColumn);
+        const newMeta = newState[tableName]!.meta;
+        if (newMeta.lastId !== meta.lastId) {
+          await fs.mkdir(getTableDir(tableName), { recursive: true });
+          await writeAtomic(metaPath, JSON.stringify(newMeta, null, 2), fs);
+        }
+        const insertedRecords = Array.isArray(result) ? result : [result];
+        await Promise.all(
+          insertedRecords.map((r: any) =>
+            writeAtomic(getRecordPath(tableName, r[idColumn]), serializer.stringify(r), fs)
+          )
+        );
         return result;
       },
       update: async (core, tableName, data, predicate) => {
         const idColumn = getIdColumn(tableName);
-        const state = createEmptyStateImpl(schema);
-        (state as any)[tableName] = await readTableState(tableName);
+        const state = await getFullState();
         const [newState, result] = core.update(state, tableName as keyof S['tables']).set(data).where(predicate as any);
         await writeTableState(tableName, newState[tableName]!, idColumn);
         return result;
       },
       delete: async (core, tableName, predicate) => {
         const idColumn = getIdColumn(tableName);
-        const state = createEmptyStateImpl(schema);
-        (state as any)[tableName] = await readTableState(tableName);
+        const state = await getFullState();
         const [newState, result] = core.delete(state, tableName as keyof S['tables']).where(predicate as any);
         await writeTableState(tableName, newState[tableName]!, idColumn);
         return result;

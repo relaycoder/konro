@@ -27,7 +27,7 @@ describe('E2E: Per-Record Strategy (On-Demand)', () => {
     expect(rootFiles).toContain('users');
     let userFiles = await readdir(path.join(dir, 'users'));
     expect(userFiles).toContain('1.json');
-    expect(userFiles).toContain('__meta.json');
+    expect(userFiles).toContain('_meta.json');
 
     // Query user
     const foundUser = await db.query().from('users').where({ id: 1 }).first();

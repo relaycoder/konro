@@ -156,19 +156,6 @@ _processWith(results, descriptor.tableName, descriptor.with, schema, state);
   return paginatedResults;
 };
 
-function findRelatedTables(schema: KonroSchema<any, any>, tableName: string): string[] {
-  const relatedTables = new Set<string>();
-  for (const sourceTable in schema.relations) {
-    for (const relationName in schema.relations[sourceTable]) {
-      const relation = schema.relations[sourceTable][relationName];
-      if (relation.targetTable === tableName) {
-        relatedTables.add(sourceTable);
-      }
-    }
-  }
-  return Array.from(relatedTables);
-}
-
 const findRelatedRecords = (state: DatabaseState, record: KRecord, relationDef: RelationDefinition) => {
   const foreignKey = record[relationDef.on];
   const targetTable = state[relationDef.targetTable];
@@ -352,36 +339,56 @@ export const _updateImpl = <S extends KonroSchema<any, any>>(state: DatabaseStat
 function applyCascades<S extends KonroSchema<any, any>>(
   state: DatabaseState<S>,
   schema: S,
-  tableName: string,
+  tableName: string, // table with deleted records, e.g. 'posts'
   deletedRecords: KRecord[]
 ): DatabaseState<S> {
   let nextState = state;
   if (!schema.relations) return nextState;
 
   const pk = Object.keys(schema.tables[tableName]).find(k => schema.tables[tableName][k]?.options?._pk_strategy) ?? 'id';
-  const sourceKeySet = new Set(deletedRecords.map(r => r[pk]));
-  if (sourceKeySet.size === 0) return nextState;
+  const deletedKeys = new Set(deletedRecords.map(r => r[pk]));
+  if (deletedKeys.size === 0) return nextState;
 
-  const relatedTables = findRelatedTables(schema, tableName);
-
-  for (const relatedTableName of relatedTables) {
-    const relations = schema.relations[relatedTableName];
-    if (!relations) continue;
+  // Iterate over all tables to find ones that have a FK to `tableName`
+  for (const relatedTableName in schema.relations) {
+    if (relatedTableName === tableName) continue;
     
-    for (const relationName in relations) {
-      const relation = relations[relationName];
-      if (relation.targetTable !== tableName) continue;
-      
-      const targetKey = relation.references;
-      const predicate = (record: KRecord) => sourceKeySet.has(record[targetKey] as any);
-      
-      if (relation.onDelete === 'CASCADE') {
-        const [cascadedState, _] = _deleteImpl(nextState, schema, relatedTableName, predicate);
-        nextState = cascadedState as DatabaseState<S>;
-      } else if (relation.onDelete === 'SET NULL') {
-        const updateData = { [targetKey]: null };
-        const [cascadedState, _] = _updateImpl(nextState, schema, relatedTableName, updateData, predicate);
-        nextState = cascadedState as DatabaseState<S>;
+    const relationsOnRelatedTable = schema.relations[relatedTableName];
+    for (const relationName in relationsOnRelatedTable) {
+      const inboundRelation = relationsOnRelatedTable[relationName];
+
+      // Found a relation pointing to our deleted table
+      if (inboundRelation.targetTable === tableName) {
+        
+        // Check for the onDelete rule. Prioritize the rule on the table with the FK.
+        // If not found, check the inverse relation (for one-to-many cases).
+        let onDelete = inboundRelation.onDelete;
+        if (!onDelete) {
+            const relationsOnOriginalTable = schema.relations[tableName] ?? {};
+            for (const outboundRelationName in relationsOnOriginalTable) {
+                const outboundRelation = relationsOnOriginalTable[outboundRelationName];
+                if (outboundRelation.targetTable === relatedTableName &&
+                    outboundRelation.on === inboundRelation.references &&
+                    outboundRelation.references === inboundRelation.on) {
+                    onDelete = outboundRelation.onDelete;
+                    break;
+                }
+            }
+        }
+
+        if (!onDelete) continue;
+
+        const foreignKey = inboundRelation.on; // The FK on the related table
+        const predicate = (record: KRecord) => deletedKeys.has(record[foreignKey] as any);
+
+        if (onDelete === 'CASCADE') {
+          const [cascadedState, _] = _deleteImpl(nextState, schema, relatedTableName, predicate);
+          nextState = cascadedState as DatabaseState<S>;
+        } else if (onDelete === 'SET NULL') {
+          const updateData = { [foreignKey]: null };
+          const [cascadedState, _] = _updateImpl(nextState, schema, relatedTableName, updateData, predicate);
+          nextState = cascadedState as DatabaseState<S>;
+        }
       }
     }
   }

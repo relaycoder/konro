@@ -6,6 +6,6 @@
 // To test against dist (mjs): export * from '../dist/index.mjs';
 // To test against dist (js):  export * from '../dist/index.js';
 // To test against npm package: export * from 'konro';
-// export * from '../src/index';
+export * from '../src/index';
 // export * from '../dist/index.mjs';
-export * from '../dist/index.js';
+// export * from '../dist/index.js';

@@ -369,7 +369,7 @@ export function createDatabase<S extends KonroSchema<any, any>>(
         const state = await getFullState();
         const [newState, result] = core.delete(state, tableName as keyof S['tables']).where(predicate as any);
         
-        const deletedIds = new Set(result.map((r: any) => r[idColumn]));
+        const deletedIds = new Set(result.map((r: any) => String(r[idColumn])));
         const tableDir = getTableDir(tableName);
         const files = await fs.readdir(tableDir);
         const toDelete = files.filter(f => deletedIds.has(path.parse(f).name));

@@ -156,6 +156,19 @@ _processWith(results, descriptor.tableName, descriptor.with, schema, state);
   return paginatedResults;
 };
 
+function findRelatedTables(schema: KonroSchema<any, any>, tableName: string): string[] {
+  const relatedTables = new Set<string>();
+  for (const sourceTable in schema.relations) {
+    for (const relationName in schema.relations[sourceTable]) {
+      const relation = schema.relations[sourceTable][relationName];
+      if (relation.targetTable === tableName) {
+        relatedTables.add(sourceTable);
+      }
+    }
+  }
+  return Array.from(relatedTables);
+}
+
 const findRelatedRecords = (state: DatabaseState, record: KRecord, relationDef: RelationDefinition) => {
   const foreignKey = record[relationDef.on];
   const targetTable = state[relationDef.targetTable];
@@ -342,47 +355,41 @@ function applyCascades<S extends KonroSchema<any, any>>(
   tableName: string,
   deletedRecords: KRecord[]
 ): DatabaseState<S> {
-  if (deletedRecords.length === 0) {
-    return state;
-  }
-
   let nextState = state;
-  const relations = schema.relations[tableName] ?? {};
+  if (!schema.relations) return nextState;
 
-  for (const relationName in relations) {
-    const relationDef = relations[relationName];
-    // We only cascade from the "one" side of a one-to-many relationship, which is a 'many' type in Konro.
-    if (!relationDef || relationDef.relationType !== 'many' || !relationDef.onDelete) {
-      continue;
-    }
+  const sourceKeySet = new Set(deletedRecords.map(r => r[schema.tables[tableName].id.options._pk as string]));
+  if (sourceKeySet.size === 0) return nextState;
 
-    const sourceKey = relationDef.on;
-    const targetTable = relationDef.targetTable;
-    const targetKey = relationDef.references;
+  const relatedTables = findRelatedTables(schema, tableName);
 
-    const sourceKeyValues = deletedRecords.map(r => r[sourceKey]).filter(v => v !== undefined);
-    if (sourceKeyValues.length === 0) continue;
-
-    const sourceKeySet = new Set(sourceKeyValues);
-    const predicate = (record: KRecord) => sourceKeySet.has(record[targetKey] as any);
-
-    if (relationDef.onDelete === 'CASCADE') {
-      // Recursively delete
-      const [newState, ] = _deleteImpl(nextState, schema, targetTable, predicate);
-      nextState = newState as DatabaseState<S>;
-    } else if (relationDef.onDelete === 'SET NULL') {
-      // Update FK to null
-      const [newState, ] = _updateImpl(nextState, schema, targetTable, { [targetKey]: null }, predicate);
-      nextState = newState as DatabaseState<S>;
+  for (const relatedTableName of relatedTables) {
+    const relations = schema.relations[relatedTableName];
+    if (!relations) continue;
+    
+    for (const relationName in relations) {
+      const relation = relations[relationName];
+      if (relation.targetTable !== tableName) continue;
+      
+      const targetKey = relation.references;
+      const predicate = (record: KRecord) => sourceKeySet.has(record[targetKey] as any);
+      
+      if (relation.onDelete === 'CASCADE') {
+        const [cascadedState, _] = _deleteImpl(nextState, schema, relatedTableName, predicate);
+        nextState = cascadedState as DatabaseState<S>;
+      } else if (relation.onDelete === 'SET NULL') {
+        const updateData = { [targetKey]: null };
+        const [cascadedState, _] = _updateImpl(nextState, schema, relatedTableName, updateData, predicate);
+        nextState = cascadedState as DatabaseState<S>;
+      }
     }
   }
-
   return nextState;
 }
 
 export const _deleteImpl = (state: DatabaseState, schema: KonroSchema<any, any>, tableName: string, predicate: (record: KRecord) => boolean): [DatabaseState, KRecord[]] => {
-  const oldTableState = state[tableName];
-  if (!oldTableState) throw KonroError({ code: 'E200', tableName });
+  const tableState = state[tableName];
+  if (!tableState) throw KonroError({ code: 'E200', tableName });
   const tableSchema = schema.tables[tableName];
   if (!tableSchema) throw KonroError({ code: 'E201', tableName });
 
@@ -406,15 +413,24 @@ export const _deleteImpl = (state: DatabaseState, schema: KonroSchema<any, any>,
   } 
   
   // Hard delete path
-  const recordsToDelete: KRecord[] = [];
-  const keptRecords = oldTableState.records.filter(r => predicate(r) ? (recordsToDelete.push(r), false) : true);
+  const deletedRecords = tableState.records.filter(predicate);
+  const remainingRecords = tableState.records.filter(r => !predicate(r));
 
-  if (recordsToDelete.length === 0) return [state, []];
+  if (deletedRecords.length === 0) {
+    return [state, []];
+  }
 
-  const baseState = { ...state, [tableName]: { ...oldTableState, records: keptRecords } };
-  const finalState = applyCascades(baseState, schema, tableName, recordsToDelete);
+  const newState = {
+    ...state,
+    [tableName]: {
+      ...tableState,
+      records: remainingRecords,
+    },
+  };
 
-  return [finalState, recordsToDelete];
+  const finalState = applyCascades(newState, schema, tableName, deletedRecords);
+
+  return [finalState, deletedRecords];
 };
 
 // --- VALIDATION ---

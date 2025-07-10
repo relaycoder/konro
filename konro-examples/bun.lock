@@ -8,7 +8,7 @@
         "@types/js-yaml": "^4.0.9",
         "@types/papaparse": "^5.3.14",
         "js-yaml": "^4.1.0",
-        "konro": "^0.1.8",
+        "konro": "^0.1.10",
         "papaparse": "^5.4.1",
         "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.2/xlsx-0.20.2.tgz",
       },
@@ -36,7 +36,7 @@
 
     "js-yaml": ["js-yaml@4.1.0", "", { "dependencies": { "argparse": "^2.0.1" }, "bin": { "js-yaml": "bin/js-yaml.js" } }, "sha512-wpxZs9NoxZaJESJGIZTyDEaYpl0FKSA+FB9aJiyemKhMwkxQg63h4T1KJgUGHpTqPDNRcmmYLugrRjJlBtWvRA=="],
 
-    "konro": ["konro@0.1.8", "", { "peerDependencies": { "js-yaml": "^4.1.0", "papaparse": "^5.4.1", "typescript": "^5.0.0", "xlsx": "^0.18.5" }, "optionalPeers": ["js-yaml", "papaparse", "xlsx"] }, "sha512-xllo/W5XbiWgW4PPTeUwvqdpdTzNiw7XS70ms2EGtyTUn3tv8dcs3YE5qig/BQ/ysz7yW7geulGUHDMMiiFfPw=="],
+    "konro": ["konro@0.1.10", "", { "peerDependencies": { "js-yaml": "^4.1.0", "papaparse": "^5.4.1", "typescript": "^5.0.0", "xlsx": "^0.18.5" }, "optionalPeers": ["js-yaml", "papaparse", "xlsx"] }, "sha512-RG8wtFfSrBsRrifXuR37cun0bY2CI4jDY+CcDjJy8IDH9clav36ttSGHW6Py9tixxeCZreuypdiiY9fahn3lZA=="],
 
     "papaparse": ["papaparse@5.5.3", "", {}, "sha512-5QvjGxYVjxO59MGU2lHVYpRWBBtKHnlIAcSe1uNFCkkptUh63NFRj0FJQm7nR67puEruUci/ZkjmEFrjCAyP4A=="],
 

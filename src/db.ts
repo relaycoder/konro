@@ -368,7 +368,19 @@ export function createDatabase<S extends KonroSchema<any, any>>(
         const idColumn = getIdColumn(tableName);
         const state = await getFullState();
         const [newState, result] = core.delete(state, tableName as keyof S['tables']).where(predicate as any);
-        await writeTableState(tableName, newState[tableName]!, idColumn);
+        
+        const deletedIds = new Set(result.map((r: any) => r[idColumn]));
+        const tableDir = getTableDir(tableName);
+        const files = await fs.readdir(tableDir);
+        const toDelete = files.filter(f => deletedIds.has(path.parse(f).name));
+        await Promise.all(toDelete.map(f => fs.unlink(path.join(tableDir, f))));
+        
+        // Also update meta if it changed (e.g., due to cascades)
+        const newMeta = newState[tableName]?.meta;
+        if (newMeta && JSON.stringify(newMeta) !== JSON.stringify(state[tableName]?.meta)) {
+            await writeAtomic(getMetaPath(tableName), JSON.stringify(newMeta, null, 2), fs);
+        }
+
         return result;
       }
     };

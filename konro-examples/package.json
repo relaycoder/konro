@@ -8,7 +8,7 @@
   "devDependencies": {
     "@types/bun": "latest",
     "js-yaml": "^4.1.0",
-    "konro": "^0.1.10",
+    "konro": "^0.1.11",
     "papaparse": "^5.4.1",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.2/xlsx-0.20.2.tgz",
     "@types/js-yaml": "^4.0.9",

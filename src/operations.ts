@@ -358,7 +358,8 @@ function applyCascades<S extends KonroSchema<any, any>>(
   let nextState = state;
   if (!schema.relations) return nextState;
 
-  const sourceKeySet = new Set(deletedRecords.map(r => r[schema.tables[tableName].id.options._pk as string]));
+  const pk = Object.keys(schema.tables[tableName]).find(k => schema.tables[tableName][k]?.options?._pk_strategy) ?? 'id';
+  const sourceKeySet = new Set(deletedRecords.map(r => r[pk]));
   if (sourceKeySet.size === 0) return nextState;
 
   const relatedTables = findRelatedTables(schema, tableName);

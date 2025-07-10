@@ -101,4 +101,18 @@ describe('In-Memory Relations', () => {
     const bobsPost = db.query(nextState).from('posts').where({ id: 2 }).first();
     expect(bobsPost?.authorId).toBe(2);
   });
+
+  it('should not set null if not the related record', () => {
+    // Delete Bob (id 2)
+    const [nextState, _] = db.delete(state, 'users').where({ id: 2 });
+    
+    // Alice's posts should be unaffected
+    const alicesPosts = db.query(nextState).from('posts').where({ authorId: 1 }).all();
+    expect(alicesPosts).toHaveLength(2);
+
+    // Bob's post should now have a null authorId
+    const bobsPost = db.query(nextState).from('posts').where({ id: 2 }).first();
+    expect(bobsPost).toBeDefined();
+    expect(bobsPost?.authorId).toBeNull();
+  });
 });
